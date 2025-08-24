@@ -8,6 +8,9 @@
     "start": "next start",
     "lint": "next lint"
   },
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
     "puppeteer-core": "22.7.1",
     "@sparticuz/chromium": "123.0.1",
