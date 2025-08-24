@@ -75,12 +75,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Visit first exact match
     await page.goto(companyLinks[0], { waitUntil: 'networkidle2' });
 
-    // Return the HTML for debugging the scraper
-    const html = await page.content();
+    // Scrape all info
+    const data = await page.evaluate(() => {
+      const results: { [key: string]: any } = {};
+      const allTds = Array.from(document.querySelectorAll('td'));
+
+      for (let i = 0; i < allTds.length; i++) {
+          let keyText = allTds[i].textContent?.trim() || '';
+          if (keyText.endsWith(':')) {
+              const key = keyText.slice(0, -1).trim();
+              if (i + 1 < allTds.length) {
+                  const value = allTds[i + 1].textContent?.trim() || '';
+                  if (key && (value || !results[key])) {
+                      results[key] = value;
+                  }
+              }
+          }
+      }
+
+      const nameElements = Array.from(document.querySelectorAll('font b'));
+      const primaryNameEl = nameElements.find(el => el.textContent?.includes('(Primary Name)'));
+      if (primaryNameEl) {
+          results['Primary Name'] = primaryNameEl.textContent?.replace('(Primary Name)', '').trim();
+      }
+      const dbaNameEl = nameElements.find(el => el.textContent?.includes('(DBA Name)'));
+      if (dbaNameEl) {
+          results['DBA Name'] = dbaNameEl.textContent?.replace('(DBA Name)', '').trim();
+      }
+
+      return results;
+    });
 
     await browser.close();
-    res.setHeader('Content-Type', 'text/html');
-    res.status(200).send(html);
+    res.status(200).json({ data });
   } catch (err) {
     if (browser) {
       await browser.close();
