@@ -30,5 +30,6 @@ export default async function handler(
   await page.setViewport({ width: 1920, height: 1080 })
   await page.goto(url)
 
-  return res.status(200).send(await page.pdf())
+  const pdf = await page.pdf();
+  return res.status(200).send(Buffer.from(pdf));
 }
