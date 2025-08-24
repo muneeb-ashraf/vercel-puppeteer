@@ -1,17 +1,22 @@
-const express = require('express');
-const router = express.Router();
+import { NextApiRequest, NextApiResponse } from 'next';
 const puppeteer = require('puppeteer');
 
-router.post('/scrape-company', async (req, res) => {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
+    return res.status(405).end(`Method ${req.method} Not Allowed`);
+  }
+
   const { companyName, licenseNumber } = req.body;
   if (!companyName && !licenseNumber) {
     return res.status(400).json({ error: 'Company name or license number required.' });
   }
 
-  const browser = await puppeteer.launch({ headless: true });
-  const page = await browser.newPage();
-
+  let browser;
   try {
+    browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+
     // Go to search page
     await page.goto('https://www.myfloridalicense.com/wl11.asp?mode=0&SID=', { waitUntil: 'networkidle2' });
 
@@ -43,9 +48,9 @@ router.post('/scrape-company', async (req, res) => {
       : `a:contains("${companyName}")`;
 
     // Evaluate page to find exact match (pseudo-selector, replace with actual logic)
-    const companyLinks = await page.$$eval('a', (anchors, query, isLicense) => {
+    const companyLinks = await page.$$eval('a', (anchors: HTMLAnchorElement[], query: string, isLicense: boolean) => {
       return anchors
-        .filter(a => isLicense ? a.textContent.trim() === query : a.textContent.trim() === query)
+        .filter(a => a.textContent && a.textContent.trim() === query)
         .map(a => a.href);
     }, licenseNumber || companyName, !!licenseNumber);
 
@@ -61,22 +66,27 @@ router.post('/scrape-company', async (req, res) => {
     const data = await page.evaluate(() => {
       // Example: get table data from company detail page
       const rows = Array.from(document.querySelectorAll('table tr'));
-      const info = {};
+      const info: { [key: string]: string } = {};
       rows.forEach(row => {
         const cells = row.querySelectorAll('td');
         if (cells.length === 2) {
-          info[cells[0].textContent.trim()] = cells[1].textContent.trim();
+          const key = cells[0].textContent?.trim();
+          const value = cells[1].textContent?.trim();
+          if (key && value) {
+            info[key] = value;
+          }
         }
       });
       return info;
     });
 
     await browser.close();
-    res.json({ data });
+    res.status(200).json({ data });
   } catch (err) {
-    await browser.close();
-    res.status(500).json({ error: err.toString() });
+    if (browser) {
+      await browser.close();
+    }
+    const error = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error });
   }
-});
-
-module.exports = router;
+}
