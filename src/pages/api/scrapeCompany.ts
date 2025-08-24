@@ -1,6 +1,4 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -13,14 +11,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Company name or license number required.' });
   }
 
-  let browser;
+  let browser = null;
   try {
+    const chromium = (await import('@sparticuz/chromium')).default;
+    const puppeteer = await import('puppeteer-core');
+
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
+
     const page = await browser.newPage();
 
     // Go to search page
@@ -61,7 +63,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }, licenseNumber || companyName, !!licenseNumber);
 
     if (companyLinks.length === 0) {
-      await browser.close();
+      if (browser) {
+        await browser.close();
+      }
       return res.status(404).json({ error: 'Company not found.' });
     }
 
