@@ -75,26 +75,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Visit first exact match
     await page.goto(companyLinks[0], { waitUntil: 'networkidle2' });
 
-    // Scrape all info (customize selectors as needed)
-    const data = await page.evaluate(() => {
-      // Example: get table data from company detail page
-      const rows = Array.from(document.querySelectorAll('table tr'));
-      const info: { [key: string]: string } = {};
-      rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length === 2) {
-          const key = cells[0].textContent?.trim();
-          const value = cells[1].textContent?.trim();
-          if (key && value) {
-            info[key] = value;
-          }
-        }
-      });
-      return info;
-    });
+    // Return the HTML for debugging the scraper
+    const html = await page.content();
 
     await browser.close();
-    res.status(200).json({ data });
+    res.setHeader('Content-Type', 'text/html');
+    res.status(200).send(html);
   } catch (err) {
     if (browser) {
       await browser.close();
