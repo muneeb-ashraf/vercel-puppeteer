@@ -102,9 +102,9 @@ function normalizeName(name: string): string {
 
 async function searchByName(page: Page, companyName: string): Promise<{ type: 'details', data: any } | { type: 'matches', data: any[] } | { type: 'not_found' }> {
     await performSearch(page, 'Name', companyName);
-    const searchResults = await page.$$eval('table[cellpadding="2"] tr a', (anchors) =>
+    const searchResults = await page.$$eval('a', (anchors) =>
       anchors
-        .filter(a => a.textContent)
+        .filter(a => a.href.includes('licensenum=') && a.textContent)
         .map(a => ({ name: a.textContent!.trim(), href: a.href }))
     );
     if (searchResults.length === 0) return { type: 'not_found' };
@@ -120,9 +120,9 @@ async function searchByName(page: Page, companyName: string): Promise<{ type: 'd
 
 async function searchByLicense(page: Page, licenseNumber: string): Promise<{ type: 'details', data: any } | { type: 'not_found' }> {
     await performSearch(page, 'LicNbr', licenseNumber);
-    const searchResults = await page.$$eval('table[cellpadding="2"] tr a', (anchors) =>
+    const searchResults = await page.$$eval('a', (anchors) =>
       anchors
-        .filter(a => a.textContent)
+        .filter(a => a.href.includes('licensenum=') && a.textContent)
         .map(a => ({ text: a.textContent!.trim(), href: a.href }))
     );
     if (searchResults.length === 0) return { type: 'not_found' };
