@@ -1,17 +1,4 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { Page } from 'puppeteer-core';
-
-// --- Response Helpers ---
-
-function sendError(res: NextApiResponse, message: string, statusCode = 400) {
-  res.status(statusCode).json({ status: 'error', message });
-}
-
-function sendSuccess(res: NextApiResponse, data: any, statusCode = 200) {
-  res.status(statusCode).json({ status: 'success', ...data });
-}
-
-// --- Main Handler ---
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -20,9 +7,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const { companyName, licenseNumber } = req.body;
-
   if (!companyName && !licenseNumber) {
-    return sendError(res, 'Company name or license number required.');
+    return res.status(400).json({ error: 'Company name or license number required.' });
   }
 
   let browser = null;
@@ -38,156 +24,152 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     const page = await browser.newPage();
+    const baseUrl = 'https://www.myfloridalicense.com/wl11.asp?mode=0&SID=';
 
-    if (companyName && licenseNumber) {
-        await handleCombinedSearch(page, res, companyName, licenseNumber);
-    } else if (companyName) {
-        await handleNameSearch(page, res, companyName);
-    } else if (licenseNumber) {
-        await handleLicenseSearch(page, res, licenseNumber);
+    // -------------------
+    // Helper Functions
+    // -------------------
+    const normalize = (str: string) => str.toLowerCase().trim();
+
+    async function searchByCompanyName(name: string) {
+      await page.goto(baseUrl, { waitUntil: 'networkidle2' });
+      await page.click('input[type="radio"][value="Name"]');
+      await page.click('button[name="SelectSearchType"]');
+      await page.waitForNavigation({ waitUntil: 'networkidle2' });
+
+      await page.type('input[name="OrgName"]', name);
+      await page.click('button[name="Search1"]');
+      await page.waitForNavigation({ waitUntil: 'networkidle2' });
+
+      const links = await page.$$eval('a', (anchors) =>
+        anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
+      );
+
+      const normalizedName = normalize(name);
+
+      const exactMatches = links.filter(l => normalize(l.text) === normalizedName);
+      const closeMatches = links.filter(l => normalize(l.text).includes(normalizedName));
+
+      if (exactMatches.length === 1) return exactMatches[0].href;
+      if (exactMatches.length > 1) return exactMatches[0].href; // pick first
+      if (closeMatches.length > 0) return { reviewNeeded: closeMatches.map(l => l.text) };
+
+      return null;
     }
 
-  } catch (err) {
-    console.error(err);
-    const error = err instanceof Error ? err.message : String(err);
-    return sendError(res, `An unexpected error occurred: ${error}`, 500);
-  } finally {
-    if (browser) {
-      await browser.close();
+    async function searchByLicenseNumber(lic: string) {
+      await page.goto(baseUrl, { waitUntil: 'networkidle2' });
+      await page.click('input[type="radio"][value="LicNbr"]');
+      await page.click('button[name="SelectSearchType"]');
+      await page.waitForNavigation({ waitUntil: 'networkidle2' });
+
+      await page.type('input[name="LicNbr"]', lic);
+      await page.click('button[name="Search1"]');
+      await page.waitForNavigation({ waitUntil: 'networkidle2' });
+
+      const links = await page.$$eval('a', (anchors) =>
+        anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
+      );
+
+      const exactMatches = links.filter(l => l.text.includes(lic));
+      if (exactMatches.length === 1) return exactMatches[0].href;
+      if (exactMatches.length > 1) return { reviewNeeded: exactMatches.map(l => l.text) };
+
+      return null;
     }
-  }
-}
 
-// --- Core Logic ---
-
-async function performSearch(page: Page, searchType: 'Name' | 'LicNbr', searchTerm: string) {
-    await page.goto('https://www.myfloridalicense.com/wl11.asp?mode=0&SID=', { waitUntil: 'networkidle2' });
-
-    const radioSelector = `input[type="radio"][name="SearchType"][value="${searchType}"]`;
-    await page.waitForSelector(radioSelector);
-    await page.click(radioSelector);
-
-    const searchTypeButtonSelector = 'button.button[name="SelectSearchType"]';
-    await page.waitForSelector(searchTypeButtonSelector);
-    await page.click(searchTypeButtonSelector);
-
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
-
-    const inputSelector = `input[name="${searchType === 'Name' ? 'OrgName' : 'LicNbr'}"]`;
-    await page.waitForSelector(inputSelector);
-    await page.type(inputSelector, searchTerm);
-
-    const search1ButtonSelector = 'button.button[name="Search1"]';
-    await page.waitForSelector(search1ButtonSelector);
-    await page.click(search1ButtonSelector);
-
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
-}
-
-async function scrapeCompanyDetails(page: Page): Promise<any> {
-    return page.evaluate(() => {
+    async function scrapeCompanyDetails(url: string) {
+      await page.goto(url, { waitUntil: 'networkidle2' });
+      return page.evaluate(() => {
         const results: { [key: string]: any } = {};
         const allTds = Array.from(document.querySelectorAll('td'));
+
         for (let i = 0; i < allTds.length; i++) {
-            let keyText = allTds[i].textContent?.trim() || '';
-            if (keyText.endsWith(':')) {
-                const key = keyText.slice(0, -1).trim();
-                if (i + 1 < allTds.length) {
-                    const value = allTds[i + 1].textContent?.trim() || '';
-                    if (key && (value || !results[key])) results[key] = value;
-                }
+          let keyText = allTds[i].textContent?.trim() || '';
+          if (keyText.endsWith(':')) {
+            const key = keyText.slice(0, -1).trim();
+            if (i + 1 < allTds.length) {
+              const value = allTds[i + 1].textContent?.trim() || '';
+              if (key && (value || !results[key])) {
+                results[key] = value;
+              }
             }
+          }
         }
+
         const nameElements = Array.from(document.querySelectorAll('font b'));
         const primaryNameEl = nameElements.find(el => el.textContent?.includes('(Primary Name)'));
-        if (primaryNameEl) results['Primary Name'] = primaryNameEl.textContent?.replace('(Primary Name)', '').trim();
-        const dbaNameEl = nameElements.find(el => el.textContent?.includes('(DBA Name)'));
-        if (dbaNameEl) results['DBA Name'] = dbaNameEl.textContent?.replace('(DBA Name)', '').trim();
-        return results;
-    });
-}
-
-function normalizeName(name: string): string {
-    if (!name) return '';
-    return name.toLowerCase().replace(/\s+/g, ' ').replace(/( inc| llc| ltd| co)\.?$/g, '').trim();
-}
-
-async function searchByName(page: Page, companyName: string): Promise<{ type: 'details', data: any } | { type: 'matches', data: any[] } | { type: 'not_found' }> {
-    await performSearch(page, 'Name', companyName);
-    const searchResults = await page.$$eval('a', (anchors) =>
-      anchors
-        .filter(a => a.href.includes('licensenum=') && a.textContent)
-        .map(a => ({ name: a.textContent!.trim(), href: a.href }))
-    );
-    if (searchResults.length === 0) return { type: 'not_found' };
-
-    const exactMatch = searchResults.find(r => normalizeName(r.name) === normalizeName(companyName));
-    if (exactMatch) {
-        await page.goto(exactMatch.href, { waitUntil: 'networkidle2' });
-        const details = await scrapeCompanyDetails(page);
-        return { type: 'details', data: details };
-    }
-    return { type: 'matches', data: searchResults };
-}
-
-async function searchByLicense(page: Page, licenseNumber: string): Promise<{ type: 'details', data: any } | { type: 'not_found' }> {
-    await performSearch(page, 'LicNbr', licenseNumber);
-    const searchResults = await page.$$eval('a', (anchors) =>
-      anchors
-        .filter(a => a.href.includes('licensenum=') && a.textContent)
-        .map(a => ({ text: a.textContent!.trim(), href: a.href }))
-    );
-    if (searchResults.length === 0) return { type: 'not_found' };
-
-    const exactMatch = searchResults.find(r => r.text === licenseNumber);
-    if (exactMatch) {
-        await page.goto(exactMatch.href, { waitUntil: 'networkidle2' });
-        const details = await scrapeCompanyDetails(page);
-        return { type: 'details', data: details };
-    }
-    return { type: 'not_found' };
-}
-
-// --- API Route Handlers ---
-
-async function handleNameSearch(page: Page, res: NextApiResponse, companyName: string) {
-    const result = await searchByName(page, companyName);
-    if (result.type === 'details') {
-        return sendSuccess(res, { company: result.data['Primary Name'] || result.data['DBA Name'], license_number: result.data['License Number'], details: result.data });
-    }
-    if (result.type === 'matches') {
-        return sendSuccess(res, { message: "Multiple close matches found. Please review and select one.", results: result.data });
-    }
-    return sendError(res, 'Company not found.', 404);
-}
-
-async function handleLicenseSearch(page: Page, res: NextApiResponse, licenseNumber: string) {
-    const result = await searchByLicense(page, licenseNumber);
-    if (result.type === 'details') {
-        return sendSuccess(res, { company: result.data['Primary Name'] || result.data['DBA Name'], license_number: result.data['License Number'], details: result.data });
-    }
-    return sendError(res, 'License number not found.', 404);
-}
-
-async function handleCombinedSearch(page: Page, res: NextApiResponse, companyName: string, licenseNumber: string) {
-    const licenseResult = await searchByLicense(page, licenseNumber);
-    if (licenseResult.type === 'not_found') {
-        return sendError(res, `No company found for license number: ${licenseNumber}`);
-    }
-
-    const nameFromLicense = licenseResult.data['Primary Name'] || licenseResult.data['DBA Name'];
-    if (normalizeName(nameFromLicense) === normalizeName(companyName)) {
-        return sendSuccess(res, { company: nameFromLicense, license_number: licenseResult.data['License Number'], details: licenseResult.data });
-    }
-
-    // As a fallback, check the name search as well
-    const nameResult = await searchByName(page, companyName);
-    if (nameResult.type === 'details') {
-        const nameFromNameSearch = nameResult.data['Primary Name'] || nameResult.data['DBA Name'];
-        if (normalizeName(nameFromNameSearch) === normalizeName(nameFromLicense)) {
-            return sendSuccess(res, { company: nameFromLicense, license_number: licenseResult.data['License Number'], details: licenseResult.data });
+        if (primaryNameEl) {
+          results['Primary Name'] = primaryNameEl.textContent?.replace('(Primary Name)', '').trim();
         }
+        const dbaNameEl = nameElements.find(el => el.textContent?.includes('(DBA Name)'));
+        if (dbaNameEl) {
+          results['DBA Name'] = dbaNameEl.textContent?.replace('(DBA Name)', '').trim();
+        }
+
+        return results;
+      });
     }
 
-    return sendError(res, `Provided company name '${companyName}' and the name found for license '${licenseNumber}' ('${nameFromLicense}') do not match.`);
+    // -------------------
+    // Main Logic
+    // -------------------
+    let responseData: any = null;
+
+    if (companyName && !licenseNumber) {
+      const result = await searchByCompanyName(companyName);
+      if (!result) return res.status(404).json({ error: 'Company not found.' });
+      if ((result as any).reviewNeeded) {
+        return res.status(200).json({ review: (result as any).reviewNeeded });
+      }
+      responseData = await scrapeCompanyDetails(result as string);
+    }
+
+    if (licenseNumber && !companyName) {
+      const result = await searchByLicenseNumber(licenseNumber);
+      if (!result) return res.status(404).json({ error: 'License number not found.' });
+      if ((result as any).reviewNeeded) {
+        return res.status(200).json({ review: (result as any).reviewNeeded });
+      }
+      responseData = await scrapeCompanyDetails(result as string);
+    }
+
+    if (companyName && licenseNumber) {
+      const companyResult = await searchByCompanyName(companyName);
+      const licenseResult = await searchByLicenseNumber(licenseNumber);
+
+      if (!companyResult || !licenseResult) {
+        return res.status(404).json({ error: 'Not found.' });
+      }
+
+      if ((companyResult as any).reviewNeeded || (licenseResult as any).reviewNeeded) {
+        return res.status(200).json({ error: 'Review needed due to multiple results.' });
+      }
+
+      // Scrape both pages and compare names
+      const companyData = await scrapeCompanyDetails(companyResult as string);
+      const licenseData = await scrapeCompanyDetails(licenseResult as string);
+
+      const name1 = normalize(companyData['Primary Name'] || '');
+      const name2 = normalize(licenseData['Primary Name'] || '');
+
+      if (!name1 || !name2) {
+        return res.status(404).json({ error: 'Not found.' });
+      }
+
+      if (name1 === name2 || name1.includes(name2) || name2.includes(name1)) {
+        responseData = licenseData; // prefer license data
+      } else {
+        return res.status(200).json({ error: 'Provided company name and license number do not match.' });
+      }
+    }
+
+    await browser.close();
+    return res.status(200).json({ data: responseData });
+
+  } catch (err) {
+    if (browser) await browser.close();
+    const error = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error });
+  }
 }
