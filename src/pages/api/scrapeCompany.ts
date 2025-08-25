@@ -67,7 +67,7 @@ async function performSearch(page: Page, searchType: 'Name' | 'LicNbr', searchTe
     await page.waitForSelector(radioSelector);
     await page.click(radioSelector);
 
-    const searchTypeButtonSelector = 'button[name="SelectSearchType"]';
+    const searchTypeButtonSelector = 'button.button[name="SelectSearchType"]';
     await page.waitForSelector(searchTypeButtonSelector);
     await page.click(searchTypeButtonSelector);
 
@@ -77,7 +77,7 @@ async function performSearch(page: Page, searchType: 'Name' | 'LicNbr', searchTe
     await page.waitForSelector(inputSelector);
     await page.type(inputSelector, searchTerm);
 
-    const search1ButtonSelector = 'button[name="Search1"]';
+    const search1ButtonSelector = 'button.button[name="Search1"]';
     await page.waitForSelector(search1ButtonSelector);
     await page.click(search1ButtonSelector);
 
