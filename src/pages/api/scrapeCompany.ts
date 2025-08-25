@@ -1,13 +1,13 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import chromium from '@sparticuz/chromium';
-import puppeteer from 'puppeteer-core';
+import puppeteer, { Page } from 'puppeteer-core';
 
 // -------------------
 // Helper Functions
 // -------------------
 const normalize = (str: string) => str.toLowerCase().trim();
 
-async function searchByCompanyName(page: any, baseUrl: string, name: string) {
+async function searchByCompanyName(page: Page, baseUrl: string, name: string) {
   await page.goto(baseUrl, { waitUntil: 'networkidle2' });
   await page.click('input[type="radio"][value="Name"]');
   await page.click('button[name="SelectSearchType"]');
@@ -17,7 +17,7 @@ async function searchByCompanyName(page: any, baseUrl: string, name: string) {
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  const links = await page.$$eval('a', (anchors) =>
+  const links = await page.$$eval('a', (anchors: HTMLAnchorElement[]) =>
     anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
   );
 
@@ -33,7 +33,7 @@ async function searchByCompanyName(page: any, baseUrl: string, name: string) {
   return null;
 }
 
-async function searchByLicenseNumber(page: any, baseUrl: string, lic: string) {
+async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   await page.goto(baseUrl, { waitUntil: 'networkidle2' });
   await page.click('input[type="radio"][value="LicNbr"]');
   await page.click('button[name="SelectSearchType"]');
@@ -43,7 +43,7 @@ async function searchByLicenseNumber(page: any, baseUrl: string, lic: string) {
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  const links = await page.$$eval('a', (anchors) =>
+  const links = await page.$$eval('a', (anchors: HTMLAnchorElement[]) =>
     anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
   );
 
@@ -54,10 +54,10 @@ async function searchByLicenseNumber(page: any, baseUrl: string, lic: string) {
   return null;
 }
 
-async function scrapeCompanyDetails(page: any, url: string) {
+async function scrapeCompanyDetails(page: Page, url: string) {
   await page.goto(url, { waitUntil: 'networkidle2' });
   return page.evaluate(() => {
-    const results: { [key: string]: any } = {};
+    const results: { [key: string]: string } = {};
     const allTds = Array.from(document.querySelectorAll('td'));
 
     for (let i = 0; i < allTds.length; i++) {
@@ -76,11 +76,11 @@ async function scrapeCompanyDetails(page: any, url: string) {
     const nameElements = Array.from(document.querySelectorAll('font b'));
     const primaryNameEl = nameElements.find(el => el.textContent?.includes('(Primary Name)'));
     if (primaryNameEl) {
-      results['Primary Name'] = primaryNameEl.textContent?.replace('(Primary Name)', '').trim();
+      results['Primary Name'] = primaryNameEl.textContent?.replace('(Primary Name)', '').trim() || '';
     }
     const dbaNameEl = nameElements.find(el => el.textContent?.includes('(DBA Name)'));
     if (dbaNameEl) {
-      results['DBA Name'] = dbaNameEl.textContent?.replace('(DBA Name)', '').trim();
+      results['DBA Name'] = dbaNameEl.textContent?.replace('(DBA Name)', '').trim() || '';
     }
 
     return results;
