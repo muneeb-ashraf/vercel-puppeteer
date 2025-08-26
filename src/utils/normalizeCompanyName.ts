@@ -14,8 +14,6 @@ export function normalizeCompanyName(name: string): string {
       .replace(/\b(CORPORATION|CORP)\b/g, "CORP")
       .replace(/\b(LIMITED|LTD)\b/g, "LTD")
       .replace(/\b(COMPANY|CO)\b/g, "CO")
-      // collapse plural mismatch
-      .replace(/\bBUILDS?\b/g, "BUILD")
+    
       .trim();
   }
-  
