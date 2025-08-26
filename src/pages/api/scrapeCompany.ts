@@ -24,8 +24,13 @@ async function searchByCompanyName(page: Page, baseUrl: string, name: string) {
 
   const normalizedName = normalizeCompanyName(name);
 
-  const exactMatches = links.filter(l => normalize(l.text) === normalizedName);
-  const closeMatches = links.filter(l => normalize(l.text).includes(normalizedName));
+  const exactMatches = links.filter(
+    l => normalizeCompanyName(l.text) === normalizedName
+  );
+
+  const closeMatches = links.filter(
+    l => normalizeCompanyName(l.text).includes(normalizedName)
+  );
 
   if (exactMatches.length === 1) return exactMatches[0].href;
   if (exactMatches.length > 1) return exactMatches[0].href; // pick first

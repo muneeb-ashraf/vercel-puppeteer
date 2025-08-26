@@ -1,22 +1,21 @@
 export function normalizeCompanyName(name: string): string {
     if (!name) return "";
   
-    let normalized = name
-      .trim()
+    return name
       .toUpperCase()
+      .trim()
       // collapse multiple spaces
-      .replace(/\b(limited liability company|l l c|llc)\b/g, "llc")
-      .replace(/\b(incorporated|inc)\b/g, "inc")
-      .replace(/\b(corporation|corp)\b/g, "corp")
-      .replace(/\b(limited|ltd)\b/g, "ltd")
-      .replace(/\b(company|co)\b/g, "co")
-  
-    // Ensure comma before legal suffixes (if missing)
-    normalized = normalized.replace(
-      /\s+(llc|inc|corp|ltd|co)\b/g,
-      ", $1"
-    );
-  
-    return normalized.trim();
+      .replace(/\s+/g, " ")
+      // strip periods/commas (to neutralize differences)
+      .replace(/[.,]/g, "")
+      // normalize common suffixes
+      .replace(/\b(LIMITED LIABILITY COMPANY|L L C|LLC)\b/g, "LLC")
+      .replace(/\b(INCORPORATED|INC)\b/g, "INC")
+      .replace(/\b(CORPORATION|CORP)\b/g, "CORP")
+      .replace(/\b(LIMITED|LTD)\b/g, "LTD")
+      .replace(/\b(COMPANY|CO)\b/g, "CO")
+      // collapse plural mismatch
+      .replace(/\bBUILDS?\b/g, "BUILD")
+      .trim();
   }
   
