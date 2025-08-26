@@ -49,16 +49,29 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  const links = await page.$$eval('a', (anchors: HTMLAnchorElement[]) =>
-    anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
+  // Scrape all rows (not just <a>)
+  const results = await page.$$eval('table tr', rows =>
+    rows.map(row => {
+      return {
+        text: row.innerText.trim(),
+        link: row.querySelector('a')?.href || null
+      };
+    })
   );
 
-  const exactMatches = links.filter(l => l.text.includes(lic));
-  if (exactMatches.length === 1) return exactMatches[0].href;
-  if (exactMatches.length > 1) return { reviewNeeded: exactMatches.map(l => l.text) };
+  // Try to find license number inside row text
+  const matches = results.filter(r => r.text.includes(lic));
+
+  if (matches.length === 1 && matches[0].link) {
+    return matches[0].link;
+  }
+  if (matches.length > 1) {
+    return { reviewNeeded: matches.map(r => r.text) };
+  }
 
   return null;
 }
+
 
 async function scrapeCompanyDetails(page: Page, url: string) {
   await page.goto(url, { waitUntil: 'networkidle2' });
