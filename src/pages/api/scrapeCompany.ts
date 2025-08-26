@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import chromium from '@sparticuz/chromium';
 import puppeteer, { Page } from 'puppeteer-core';
+import { normalizeCompanyName } from "@/utils/normalizeCompanyName";
 
 // -------------------
 // Helper Functions
@@ -21,7 +22,7 @@ async function searchByCompanyName(page: Page, baseUrl: string, name: string) {
     anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
   );
 
-  const normalizedName = normalize(name);
+  const normalizedName = normalizeCompanyName(name);
 
   const exactMatches = links.filter(l => normalize(l.text) === normalizedName);
   const closeMatches = links.filter(l => normalize(l.text).includes(normalizedName));
