@@ -3,6 +3,7 @@ export function normalizeCompanyName(name: string): string {
   
     let normalized = name
       .trim()
+      .toUpperCase()
       // collapse multiple spaces
       .replace(/\b(limited liability company|l l c|llc)\b/g, "llc")
       .replace(/\b(incorporated|inc)\b/g, "inc")
