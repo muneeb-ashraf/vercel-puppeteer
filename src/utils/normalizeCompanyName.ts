@@ -5,7 +5,6 @@ export function normalizeCompanyName(name: string): string {
       .toLowerCase()
       .trim()
       .replace(/\s+/g, " ") // collapse multiple spaces
-      .replace(/[.,]/g, "") // remove commas & periods
       .replace(/\b(limited liability company|llc|l\.?l\.?c\.?)\b/g, "llc")
       .replace(/\b(incorporated|inc|i\.?n\.?c\.?)\b/g, "inc")
       .replace(/\b(corporation|corp|c\.?o\.?r\.?p\.?)\b/g, "corp")
