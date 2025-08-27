@@ -120,7 +120,7 @@ async function scrapeCompanyDetails(page: Page, url: string) {
       const tableRows = Array.from(document.querySelectorAll('table tr'));
       
       for (const row of tableRows) {
-        const text = row.innerText.trim();
+        const text = (row as HTMLElement).innerText.trim();
         
         // Look for the data row with license info - more generic approach
         if (text.includes('\t') && (text.includes('Architect') || text.includes('Building') || text.includes('AR') || text.includes('CBC'))) {
@@ -249,7 +249,6 @@ async function scrapeCompanyDetails(page: Page, url: string) {
     complaints,
   };
 }
-
 // -------------------
 // API Handler
 // -------------------
