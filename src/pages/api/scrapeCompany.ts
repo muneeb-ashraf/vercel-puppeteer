@@ -49,18 +49,22 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-    const links = await page.$$eval('a', (anchors: HTMLAnchorElement[]) =>
-    anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
-  );
+  // Get all rows and check for license number inside row text
+  const result = await page.$$eval('table tr', (rows, lic) => {
+    for (const row of rows) {
+      if (row.innerText.includes(lic)) {
+        const link = row.querySelector('a')?.href || null;
+        if (link) return link;
+      }
+    }
+    return null;
+  }, lic);
 
+  if (result) return result;
 
-  if (links.length === 1) return links[0].href;
-  if (links.length > 1) return links[0].href; // pick first
-  if (links.length == 0) return { reviewNeeded: links.map(l => l.text) };
-
-  return null;
-
+  return { message: `Review Needed, No company found on License Number ${lic}.` };
 }
+
 
 
 
