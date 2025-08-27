@@ -105,84 +105,134 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, license: strin
 async function scrapeCompanyDetails(page: Page, url: string) {
   await page.goto(url, { waitUntil: "networkidle2" });
 
-  // scrape all company details
-  const companyData = await page.evaluate(() => {
-    const results: { [key: string]: string } = {};
-    const allTds = Array.from(document.querySelectorAll("td"));
+  // Check if we're on a search results page or a detail page
+  const pageContent = await page.content();
+  const isSearchResultsPage = pageContent.includes('Search Results') || pageContent.includes('License Type');
+  
+  let companyData: { [key: string]: string } = {};
 
-    for (let i = 0; i < allTds.length; i++) {
-      let keyText = allTds[i].textContent?.trim() || "";
-      if (keyText.endsWith(":")) {
-        const key = keyText.slice(0, -1).trim();
-        if (i + 1 < allTds.length) {
-          const value = allTds[i + 1].textContent?.trim() || "";
-          if (key && (value || !results[key])) {
-            results[key] = value;
+  if (isSearchResultsPage) {
+    // Handle search results page format
+    companyData = await page.evaluate(() => {
+      const results: { [key: string]: string } = {};
+      
+      // Try to extract data from the search results table
+      const tableRows = Array.from(document.querySelectorAll('table tr'));
+      
+      for (const row of tableRows) {
+        const cells = Array.from(row.querySelectorAll('td'));
+        if (cells.length >= 2) {
+          const text = row.innerText.trim();
+          
+          // Look for the data row with license info
+          if (text.includes('Architect') || text.includes('AR0008387')) {
+            const parts = text.split('\t').filter(part => part.trim());
+            
+            if (parts.length >= 5) {
+              results['License Type'] = parts[0] || '';
+              results['Primary Name'] = parts[1] || '';
+              results['Name Type'] = parts[2] || '';
+              results['License Number'] = parts[3] || '';
+              results['Status'] = parts[4] || '';
+            }
           }
         }
       }
-    }
+      
+      // Look for address information
+      const addressMatch = document.body.innerText.match(/Main Address\*?:\s*([^\n]+)/i);
+      if (addressMatch) {
+        results['Main Address'] = addressMatch[1].trim();
+      }
+      
+      // Look for expiration date
+      const expirationMatch = document.body.innerText.match(/(\d{2}\/\d{2}\/\d{4})/);
+      if (expirationMatch) {
+        results['Expires'] = expirationMatch[1];
+      }
+      
+      return results;
+    });
+  } else {
+    // Handle detailed profile page format (original logic)
+    companyData = await page.evaluate(() => {
+      const results: { [key: string]: string } = {};
+      const allTds = Array.from(document.querySelectorAll("td"));
 
-    return results;
-  });
+      for (let i = 0; i < allTds.length; i++) {
+        let keyText = allTds[i].textContent?.trim() || "";
+        if (keyText.endsWith(":")) {
+          const key = keyText.slice(0, -1).trim();
+          if (i + 1 < allTds.length) {
+            const value = allTds[i + 1].textContent?.trim() || "";
+            if (key && (value || !results[key])) {
+              results[key] = value;
+            }
+          }
+        }
+      }
 
-  // now handle license complaint page
+      return results;
+    });
+  }
+
+  // Handle complaints (this logic stays the same)
   const complaintLink = await page.evaluate(() => {
     const anchor = Array.from(document.querySelectorAll("a")).find(a =>
-      a.textContent?.toLowerCase().includes("view license complaint")
+      a.textContent?.toLowerCase().includes("view license complaint") ||
+      a.textContent?.toLowerCase().includes("complaint")
     );
     return anchor ? (anchor as HTMLAnchorElement).href : null;
   });
 
-
-  
   let complaints: any[] = [];
-if (complaintLink) {
-  await page.goto(complaintLink, { waitUntil: "networkidle2" });
+  if (complaintLink) {
+    try {
+      await page.goto(complaintLink, { waitUntil: "networkidle2" });
 
-  complaints = await page.evaluate(() => {
-    const tables = Array.from(document.querySelectorAll("table"));
-    let targetTable: HTMLTableElement | null = null;
+      complaints = await page.evaluate(() => {
+        const tables = Array.from(document.querySelectorAll("table"));
+        let targetTable: HTMLTableElement | null = null;
 
-    // Find the table that has a header row containing "Number" and "Class"
-    for (const table of tables) {
-      const headerText = table.innerText.toLowerCase();
-      if (headerText.includes("number") && headerText.includes("class")) {
-        targetTable = table as HTMLTableElement;
-        break;
-      }
+        // Find the table that has a header row containing "Number" and "Class"
+        for (const table of tables) {
+          const headerText = table.innerText.toLowerCase();
+          if (headerText.includes("number") && headerText.includes("class")) {
+            targetTable = table as HTMLTableElement;
+            break;
+          }
+        }
+
+        if (!targetTable) return [];
+
+        const rows = Array.from(targetTable.querySelectorAll("tr"));
+        const data: any[] = [];
+
+        for (let i = 1; i < rows.length; i++) {  // skip header row
+          const cells = Array.from(rows[i].querySelectorAll("td")).map(td =>
+            td.textContent?.trim() || ""
+          );
+
+          if (cells.length > 1 && cells[0] && cells[0] !== 'Number') {  // Skip header and empty rows
+            data.push({
+              number: cells[0] || "",
+              class: cells[1] || "",
+              incidentDate: cells[2] || "",
+              status: cells[3] || "",
+              disposition: cells[4] || "",
+              dispositionDate: cells[5] || "",
+              discipline: cells[6] || ""
+            });
+          }
+        }
+
+        return data;
+      });
+    } catch (error) {
+      console.log('Could not fetch complaints:', error);
+      complaints = [];
     }
-
-    if (!targetTable) return [];
-
-    const rows = Array.from(targetTable.querySelectorAll("tr"));
-    const data: any[] = [];
-
-    for (let i = 1; i < rows.length; i++) {  // skip header row
-      const cells = Array.from(rows[i].querySelectorAll("td")).map(td =>
-        td.textContent?.trim() || ""
-      );
-
-      if (cells.length > 1) {
-        data.push({
-          number: cells[0] || "",
-          class: cells[1] || "",
-          incidentDate: cells[2] || "",
-          status: cells[3] || "",
-          disposition: cells[4] || "",
-          dispositionDate: cells[5] || "",
-          discipline: cells[6] || ""
-        });
-      }
-    }
-
-    return data;
-  });
-}
-
-
-
-
+  }
 
   return {
     ...companyData,
