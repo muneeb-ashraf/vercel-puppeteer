@@ -66,25 +66,29 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
     return matches[0].link;
   }
   if (matches.length > 1) {
-    return { reviewNeeded: matches.map(r => r.text) };
+    return matches[0].link; // pick first
+  }
+  if (matches.length === 0) {
+  return { message: "Review Needed, No company found on this License Number." };
   }
 
-  return null;
 }
 
 
 async function scrapeCompanyDetails(page: Page, url: string) {
-  await page.goto(url, { waitUntil: 'networkidle2' });
-  return page.evaluate(() => {
+  await page.goto(url, { waitUntil: "networkidle2" });
+
+  // scrape all company details
+  const companyData = await page.evaluate(() => {
     const results: { [key: string]: string } = {};
-    const allTds = Array.from(document.querySelectorAll('td'));
+    const allTds = Array.from(document.querySelectorAll("td"));
 
     for (let i = 0; i < allTds.length; i++) {
-      let keyText = allTds[i].textContent?.trim() || '';
-      if (keyText.endsWith(':')) {
+      let keyText = allTds[i].textContent?.trim() || "";
+      if (keyText.endsWith(":")) {
         const key = keyText.slice(0, -1).trim();
         if (i + 1 < allTds.length) {
-          const value = allTds[i + 1].textContent?.trim() || '';
+          const value = allTds[i + 1].textContent?.trim() || "";
           if (key && (value || !results[key])) {
             results[key] = value;
           }
@@ -92,18 +96,41 @@ async function scrapeCompanyDetails(page: Page, url: string) {
       }
     }
 
-    const nameElements = Array.from(document.querySelectorAll('font b'));
-    const primaryNameEl = nameElements.find(el => el.textContent?.includes('(Primary Name)'));
-    if (primaryNameEl) {
-      results['Primary Name'] = primaryNameEl.textContent?.replace('(Primary Name)', '').trim() || '';
-    }
-    const dbaNameEl = nameElements.find(el => el.textContent?.includes('(DBA Name)'));
-    if (dbaNameEl) {
-      results['DBA Name'] = dbaNameEl.textContent?.replace('(DBA Name)', '').trim() || '';
-    }
-
     return results;
   });
+
+  // now handle license complaint page
+  const complaintLink = await page.evaluate(() => {
+    const anchor = Array.from(document.querySelectorAll("a")).find(a =>
+      a.textContent?.toLowerCase().includes("view license complaint")
+    );
+    return anchor ? (anchor as HTMLAnchorElement).href : null;
+  });
+
+  let complaints: any[] = [];
+  if (complaintLink) {
+    await page.goto(complaintLink, { waitUntil: "networkidle2" });
+    complaints = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll("table tr"));
+      const data: any[] = [];
+
+      for (let row of rows) {
+        const cells = Array.from(row.querySelectorAll("td")).map(td =>
+          td.textContent?.trim() || ""
+        );
+        if (cells.length > 1) {
+          data.push(cells);
+        }
+      }
+
+      return data;
+    });
+  }
+
+  return {
+    ...companyData,
+    complaints,
+  };
 }
 
 // -------------------
@@ -136,6 +163,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (companyName && !licenseNumber) {
       const result = await searchByCompanyName(page, baseUrl, companyName);
+
       if (!result) return res.status(404).json({ error: 'Company not found.' });
       if ((result as any).reviewNeeded) {
         return res.status(200).json({ review: (result as any).reviewNeeded });
