@@ -39,46 +39,35 @@ async function searchByCompanyName(page: Page, baseUrl: string, name: string) {
   return null;
 }
 
-async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
+async function searchByLicenseNumber(page: Page, baseUrl: string, license: string) {
+  // Go to base page
   await page.goto(baseUrl, { waitUntil: 'networkidle2' });
-  await page.click('input[type="radio"][value="LicNbr"]');
+
+  // Select "License" radio option
+  await page.click('input[type="radio"][value="License"]');
   await page.click('button[name="SelectSearchType"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  await page.type('input[name="LicNbr"]', lic);
+  // Enter the license number directly (case-sensitive, no normalization)
+  await page.type('input[name="LicNumber"]', license);
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  // normalize: remove spaces, make uppercase, keep numbers as is
-  const normalizedLic = lic.replace(/\s+/g, "").toUpperCase();
+  // Collect all links on the results page
+  const links = await page.$$eval('a', (anchors: HTMLAnchorElement[]) =>
+    anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
+  );
 
-  const results = await page.$$eval("table tr", (rows, normalizedLic) =>
-    rows.map(row => {
-      const text = row.innerText.replace(/\s+/g, " ").trim();
-      const linkEl = row.querySelector("a") as HTMLAnchorElement | null;
-      return {
-        text,
-        link: linkEl
-          ? (linkEl.href.startsWith("http")
-              ? linkEl.href
-              : window.location.origin + "/" + linkEl.getAttribute("href"))
-          : null,
-        match: text.includes(normalizedLic),
-      };
-    })
-  , normalizedLic);
+  // Look for exact match (case-sensitive comparison)
+  const exactMatches = links.filter(l => l.text === license);
 
-  const matches = results.filter(r => r.match);
+  if (exactMatches.length === 1) return exactMatches[0].href;
+  if (exactMatches.length > 1) return exactMatches[0].href; // pick first if multiple
+  if (links.length > 0) return { reviewNeeded: links.map(l => l.text) };
 
-  if (matches.length === 1 && matches[0].link) {
-    return matches[0].link;
-  }
-if (matches.length > 1) {
-  return { reviewNeeded: matches.map(r => ({ text: r.text, link: r.link })) };
+  return null;
 }
 
-  return { message: `Review Needed, No company found on License Number ${lic}.` };
-}
 
 
 
