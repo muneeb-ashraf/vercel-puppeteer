@@ -44,27 +44,44 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, license: strin
   const normalizedLicense = license.replace(/[a-z]/g, c => c.toUpperCase());
 
   await page.goto(baseUrl, { waitUntil: 'networkidle2' });
-  await page.click('input[type="radio"][value="LicNbr"]');
+  await page.click('input[type="radio"][value="LicNbr"]'); // select license radio
   await page.click('button[name="SelectSearchType"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
+  // Type into license number field
   await page.type('input[name="LicNbr"]', normalizedLicense);
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  // Extract the first link from the results table that contains our license number
-  const licenseLink = await page.evaluate((licenseNum) => {
-    // Find all links in the table
-    const links = Array.from(document.querySelectorAll('table a'));
+  // Find the specific results table with the correct attributes
+  const licenseLink = await page.evaluate((licenseNumber) => {
+    // Find the table with the specific attributes
+    const targetTable = Array.from(document.querySelectorAll('table')).find(table => 
+      table.getAttribute('width') === '100%' &&
+      table.getAttribute('border') === '0' &&
+      table.getAttribute('cellspacing') === '0' &&
+      table.getAttribute('cellpadding') === '4' &&
+      table.getAttribute('bgcolor') === '#f1f1f1'
+    );
+
+    if (!targetTable) return null;
+
+    // Look for rows in this table
+    const rows = Array.from(targetTable.querySelectorAll('tr'));
     
-    // Find the link where the parent row contains our license number
-    for (const link of links) {
-      const row = link.closest('tr');
-      if (row && row.innerText.includes(licenseNum)) {
-        return (link as HTMLAnchorElement).href;
+    for (const row of rows) {
+      const rowText = (row as HTMLElement).innerText;
+      
+      // Check if this row contains our license number
+      if (rowText.includes(licenseNumber)) {
+        // Find the anchor tag in this row
+        const anchor = row.querySelector('a');
+        if (anchor) {
+          return (anchor as HTMLAnchorElement).href;
+        }
       }
     }
-    
+
     return null;
   }, normalizedLicense);
 
