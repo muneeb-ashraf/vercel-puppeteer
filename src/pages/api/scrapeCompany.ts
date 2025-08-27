@@ -192,11 +192,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(200).json({ error: 'Review needed due to multiple results.' });
       }
 
-      const companyData = await scrapeCompanyDetails(page, companyResult as string);
-      const licenseData = await scrapeCompanyDetails(page, licenseResult as string);
+      const companyData = await scrapeCompanyDetails(page, companyResult as string) as Record<string, any>;
+      const licenseData = await scrapeCompanyDetails(page, licenseResult as string) as Record<string, any>;
 
       const name1 = normalize(companyData['Primary Name'] || '');
       const name2 = normalize(licenseData['Primary Name'] || '');
+
 
       if (!name1 || !name2) {
         return res.status(404).json({ error: 'Not found.' });
