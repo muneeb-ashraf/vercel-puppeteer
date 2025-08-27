@@ -49,7 +49,8 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  const normalizedLic = lic.replace(/\s+/g, "").toLowerCase();
+  // normalize: remove spaces, make uppercase, keep numbers as is
+  const normalizedLic = lic.replace(/\s+/g, "").toUpperCase();
 
   const result = await page.evaluate((normalizedLic) => {
     const rows = Array.from(document.querySelectorAll("table tr"));
@@ -59,7 +60,7 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
 
       // check each cell for the license number
       for (const cell of cells) {
-        const text = cell.innerText.replace(/\s+/g, "").toLowerCase();
+        const text = cell.innerText.replace(/\s+/g, "").toUpperCase();
         if (text.includes(normalizedLic)) {
           // grab the <a> from the same row
           const linkEl = row.querySelector("a") as HTMLAnchorElement | null;
@@ -79,6 +80,7 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
 
   return { message: `Review Needed, No company found on License Number ${lic}.` };
 }
+
 
 
 
