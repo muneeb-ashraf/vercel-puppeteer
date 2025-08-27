@@ -53,23 +53,27 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, license: strin
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  // Collect result links
-  const links = await page.$$eval('a', (anchors: HTMLAnchorElement[]) =>
-    anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
+  // Scrape all result rows (not just anchors)
+  const results = await page.$$eval('table tr', rows =>
+    rows.map(row => ({
+      text: row.innerText.trim(),
+      link: row.querySelector('a')?.href || null
+    }))
   );
 
-  // Try exact match
-  const exactMatches = links.filter(l => l.text === normalizedLicense);
+  // Match against normalized license number
+  const matches = results.filter(r => r.text.includes(normalizedLicense));
 
-  if (exactMatches.length === 1) return exactMatches[0].href;
-  if (exactMatches.length > 1) return exactMatches[0].href; // pick first
+  if (matches.length === 1 && matches[0].link) {
+    return matches[0].link;
+  }
+  if (matches.length > 1) {
+    return { reviewNeeded: matches.map(r => r.text) };
+  }
 
-  // If nothing exact, return all close ones (review needed)
-  const closeMatches = links.filter(l => l.text.includes(normalizedLicense));
-  if (closeMatches.length > 0) return { reviewNeeded: closeMatches.map(l => l.text) };
-
-  return null;
+  return { error: "License number not found." };
 }
+
 
 
 
