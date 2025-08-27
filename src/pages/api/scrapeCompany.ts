@@ -52,34 +52,34 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   // normalize: remove spaces, make uppercase, keep numbers as is
   const normalizedLic = lic.replace(/\s+/g, "").toUpperCase();
 
-  const result = await page.evaluate((normalizedLic) => {
-    const rows = Array.from(document.querySelectorAll("table tr"));
-    for (const row of rows) {
-      const cells = Array.from(row.querySelectorAll("td"));
-      if (cells.length === 0) continue;
-
-      // check each cell for the license number
-      for (const cell of cells) {
-        const text = cell.innerText.replace(/\s+/g, "").toUpperCase();
-        if (text.includes(normalizedLic)) {
-          // grab the <a> from the same row
-          const linkEl = row.querySelector("a") as HTMLAnchorElement | null;
-          if (linkEl) {
-            // handle relative href like "LicenseDetail.asp?...id=XXXX"
-            return linkEl.href.startsWith("http")
+  const results = await page.$$eval("table tr", (rows, normalizedLic) =>
+    rows.map(row => {
+      const text = row.innerText.replace(/\s+/g, "").toUpperCase();
+      const linkEl = row.querySelector("a") as HTMLAnchorElement | null;
+      return {
+        text,
+        link: linkEl
+          ? (linkEl.href.startsWith("http")
               ? linkEl.href
-              : window.location.origin + "/" + linkEl.getAttribute("href");
-          }
-        }
-      }
-    }
-    return null;
-  }, normalizedLic);
+              : window.location.origin + "/" + linkEl.getAttribute("href"))
+          : null,
+        match: text.includes(normalizedLic),
+      };
+    })
+  , normalizedLic);
 
-  if (result) return result;
+  const matches = results.filter(r => r.match);
+
+  if (matches.length === 1 && matches[0].link) {
+    return matches[0].link;
+  }
+  if (matches.length > 1) {
+    return { reviewNeeded: matches.map(r => r.text) };
+  }
 
   return { message: `Review Needed, No company found on License Number ${lic}.` };
 }
+
 
 
 
