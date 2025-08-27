@@ -120,27 +120,30 @@ async function scrapeCompanyDetails(page: Page, url: string) {
       const tableRows = Array.from(document.querySelectorAll('table tr'));
       
       for (const row of tableRows) {
-        const cells = Array.from(row.querySelectorAll('td'));
-        if (cells.length >= 2) {
-          const text = row.innerText.trim();
+        const text = row.innerText.trim();
+        
+        // Look for the data row with license info - more generic approach
+        if (text.includes('\t') && (text.includes('Architect') || text.includes('Building') || text.includes('AR') || text.includes('CBC'))) {
+          const parts = text.split('\t').filter(part => part.trim());
           
-          // Look for the data row with license info
-          if (text.includes('Architect') || text.includes('AR0008387')) {
-            const parts = text.split('\t').filter(part => part.trim());
+          if (parts.length >= 4) {
+            results['License Type'] = parts[0] || '';
+            results['Primary Name'] = parts[1] || '';
+            results['Name Type'] = parts[2] || '';
+            results['License Number'] = parts[3] || '';
             
-            if (parts.length >= 5) {
-              results['License Type'] = parts[0] || '';
-              results['Primary Name'] = parts[1] || '';
-              results['Name Type'] = parts[2] || '';
-              results['License Number'] = parts[3] || '';
-              results['Status'] = parts[4] || '';
+            // Handle status and expiration which might be in parts[4] or separate
+            if (parts[4]) {
+              if (parts[4].includes('Current') || parts[4].includes('Active') || parts[4].includes('Inactive')) {
+                results['Status'] = parts[4];
+              }
             }
           }
         }
       }
       
       // Look for address information
-      const addressMatch = document.body.innerText.match(/Main Address\*?:\s*([^\n]+)/i);
+      const addressMatch = document.body.innerText.match(/Main Address\*?:\s*([^\n\r]+)/i);
       if (addressMatch) {
         results['Main Address'] = addressMatch[1].trim();
       }
@@ -176,7 +179,7 @@ async function scrapeCompanyDetails(page: Page, url: string) {
     });
   }
 
-  // Handle complaints (this logic stays the same)
+  // Handle complaints - improved logic
   const complaintLink = await page.evaluate(() => {
     const anchor = Array.from(document.querySelectorAll("a")).find(a =>
       a.textContent?.toLowerCase().includes("view license complaint") ||
@@ -197,7 +200,7 @@ async function scrapeCompanyDetails(page: Page, url: string) {
         // Find the table that has a header row containing "Number" and "Class"
         for (const table of tables) {
           const headerText = table.innerText.toLowerCase();
-          if (headerText.includes("number") && headerText.includes("class")) {
+          if (headerText.includes("number") && headerText.includes("class") && headerText.includes("incident")) {
             targetTable = table as HTMLTableElement;
             break;
           }
@@ -213,7 +216,14 @@ async function scrapeCompanyDetails(page: Page, url: string) {
             td.textContent?.trim() || ""
           );
 
-          if (cells.length > 1 && cells[0] && cells[0] !== 'Number') {  // Skip header and empty rows
+          // Only include actual complaint data, not navigation menu or header text
+          if (cells.length > 1 && cells[0] && 
+              !cells[0].includes('HOME') && 
+              !cells[0].includes('ONLINE SERVICES') && 
+              !cells[0].includes('SEARCH RESULTS') &&
+              !cells[0].includes('Number') &&
+              cells[0] !== 'Number') {
+            
             data.push({
               number: cells[0] || "",
               class: cells[1] || "",
