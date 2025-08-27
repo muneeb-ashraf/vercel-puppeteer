@@ -63,12 +63,10 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   const matches = results.filter(r => r.text.includes(lic));
 
   if (matches.length > 0 && matches[0].link) {
-    // ✅ Step 2: scrape details page
-    const detailUrl = matches[0].link;
-    return await scrapeCompanyDetails(page, detailUrl);
-  }
+  return matches[0].link; // just return URL
+}
+return null;
 
-  return { message: "Review Needed, No company found on this License Number." };
 }
 
 
