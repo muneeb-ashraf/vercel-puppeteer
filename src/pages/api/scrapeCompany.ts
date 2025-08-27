@@ -103,21 +103,36 @@ async function scrapeCompanyDetails(page: Page, url: string) {
     return anchor ? (anchor as HTMLAnchorElement).href : null;
   });
 
+
+  
   let complaints: any[] = [];
-  if (complaintLink) {
+if (complaintLink) {
   await page.goto(complaintLink, { waitUntil: "networkidle2" });
+
   complaints = await page.evaluate(() => {
-    // Select only rows inside the bordered complaint table
-    const rows = Array.from(document.querySelectorAll('table[style*="border:1px solid"] tr'));
+    const tables = Array.from(document.querySelectorAll("table"));
+    let targetTable: HTMLTableElement | null = null;
+
+    // Find the table that has a header row containing "Number" and "Class"
+    for (const table of tables) {
+      const headerText = table.innerText.toLowerCase();
+      if (headerText.includes("number") && headerText.includes("class")) {
+        targetTable = table as HTMLTableElement;
+        break;
+      }
+    }
+
+    if (!targetTable) return [];
+
+    const rows = Array.from(targetTable.querySelectorAll("tr"));
     const data: any[] = [];
 
-    for (let row of rows) {
-      const cells = Array.from(row.querySelectorAll("td")).map(td =>
+    for (let i = 1; i < rows.length; i++) {  // skip header row
+      const cells = Array.from(rows[i].querySelectorAll("td")).map(td =>
         td.textContent?.trim() || ""
       );
 
-      // Skip header row (starts with "Number", "Class", etc.)
-      if (cells.length > 1 && !cells[0].toLowerCase().includes("number")) {
+      if (cells.length > 1) {
         data.push({
           number: cells[0] || "",
           class: cells[1] || "",
@@ -131,8 +146,11 @@ async function scrapeCompanyDetails(page: Page, url: string) {
     }
 
     return data;
-    });
-  }
+  });
+}
+
+
+
 
 
   return {
@@ -191,9 +209,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if ((result as any).message) {
     return res.status(200).json(result);
   }
-
-  // result is already the company data (no need to rescrape)
-  responseData = result;
+responseData = await scrapeCompanyDetails(page, result as string);
 }
 
 
