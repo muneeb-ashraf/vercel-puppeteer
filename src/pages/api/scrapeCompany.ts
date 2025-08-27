@@ -49,21 +49,37 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  // Get all rows and check for license number inside row text
-  const result = await page.$$eval('table tr', (rows, lic) => {
+  const normalizedLic = lic.replace(/\s+/g, "").toLowerCase();
+
+  const result = await page.evaluate((normalizedLic) => {
+    const rows = Array.from(document.querySelectorAll("table tr"));
     for (const row of rows) {
-      if (row.innerText.includes(lic)) {
-        const link = row.querySelector('a')?.href || null;
-        if (link) return link;
+      const cells = Array.from(row.querySelectorAll("td"));
+      if (cells.length === 0) continue;
+
+      // check each cell for the license number
+      for (const cell of cells) {
+        const text = cell.innerText.replace(/\s+/g, "").toLowerCase();
+        if (text.includes(normalizedLic)) {
+          // grab the <a> from the same row
+          const linkEl = row.querySelector("a") as HTMLAnchorElement | null;
+          if (linkEl) {
+            // handle relative href like "LicenseDetail.asp?...id=XXXX"
+            return linkEl.href.startsWith("http")
+              ? linkEl.href
+              : window.location.origin + "/" + linkEl.getAttribute("href");
+          }
+        }
       }
     }
     return null;
-  }, lic);
+  }, normalizedLic);
 
   if (result) return result;
 
   return { message: `Review Needed, No company found on License Number ${lic}.` };
 }
+
 
 
 
