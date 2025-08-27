@@ -53,12 +53,15 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, license: strin
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  // Scrape all result rows (not just anchors)
+  // Scrape all result rows and extract links properly
   const results = await page.$$eval('table tr', rows =>
-    rows.map(row => ({
-      text: row.innerText.trim(),
-      link: row.querySelector('a')?.href || null
-    }))
+    rows.map(row => {
+      const link = row.querySelector('a');
+      return {
+        text: row.innerText.trim(),
+        link: link ? link.href : null
+      };
+    }).filter(r => r.link) // Only keep rows that have links
   );
 
   // Match against normalized license number
@@ -67,14 +70,30 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, license: strin
   if (matches.length === 1 && matches[0].link) {
     return matches[0].link;
   }
+  
   if (matches.length > 1) {
-    return { reviewNeeded: matches.map(r => r.text) };
+    // Find exact match first
+    const exactMatch = matches.find(r => {
+      const text = r.text.toUpperCase();
+      return text.includes(normalizedLicense) && r.link;
+    });
+    
+    if (exactMatch) {
+      return exactMatch.link;
+    }
+    
+    // If no exact match, return the first one with a link
+    const firstWithLink = matches.find(r => r.link);
+    if (firstWithLink) {
+      return firstWithLink.link;
+    }
+    
+    // If still no link found, return review needed with just the license numbers/names
+    return { reviewNeeded: matches.map(r => r.text.split('\t')[1] || r.text).slice(0, 5) };
   }
 
   return { error: "License number not found." };
 }
-
-
 
 
 
