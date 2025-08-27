@@ -54,7 +54,7 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
 
   const results = await page.$$eval("table tr", (rows, normalizedLic) =>
     rows.map(row => {
-      const text = row.innerText.replace(/\s+/g, "").toUpperCase();
+      const text = row.innerText.replace(/\s+/g, " ").trim();
       const linkEl = row.querySelector("a") as HTMLAnchorElement | null;
       return {
         text,
@@ -73,9 +73,9 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   if (matches.length === 1 && matches[0].link) {
     return matches[0].link;
   }
-  if (matches.length > 1) {
-    return { reviewNeeded: matches.map(r => r.text) };
-  }
+if (matches.length > 1) {
+  return { reviewNeeded: matches.map(r => ({ text: r.text, link: r.link })) };
+}
 
   return { message: `Review Needed, No company found on License Number ${lic}.` };
 }
