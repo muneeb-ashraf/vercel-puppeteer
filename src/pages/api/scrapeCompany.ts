@@ -40,33 +40,37 @@ async function searchByCompanyName(page: Page, baseUrl: string, name: string) {
 }
 
 async function searchByLicenseNumber(page: Page, baseUrl: string, license: string) {
-  // Go to base page
-  await page.goto(baseUrl, { waitUntil: 'networkidle2' });
+  // Normalize: uppercase only letters, keep numbers unchanged
+  const normalizedLicense = license.replace(/[a-z]/g, c => c.toUpperCase());
 
-  // Select "License" radio option
-  await page.click('input[type="radio"][value="License"]');
+  await page.goto(baseUrl, { waitUntil: 'networkidle2' });
+  await page.click('input[type="radio"][value="LicNbr"]'); // select license radio
   await page.click('button[name="SelectSearchType"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  // Enter the license number directly (case-sensitive, no normalization)
-  await page.type('input[name="LicNumber"]', license);
+  // Type into license number field
+  await page.type('input[name="LicNbr"]', normalizedLicense);
   await page.click('button[name="Search1"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  // Collect all links on the results page
+  // Collect result links
   const links = await page.$$eval('a', (anchors: HTMLAnchorElement[]) =>
     anchors.map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
   );
 
-  // Look for exact match (case-sensitive comparison)
-  const exactMatches = links.filter(l => l.text === license);
+  // Try exact match
+  const exactMatches = links.filter(l => l.text === normalizedLicense);
 
   if (exactMatches.length === 1) return exactMatches[0].href;
-  if (exactMatches.length > 1) return exactMatches[0].href; // pick first if multiple
-  if (links.length > 0) return { reviewNeeded: links.map(l => l.text) };
+  if (exactMatches.length > 1) return exactMatches[0].href; // pick first
+
+  // If nothing exact, return all close ones (review needed)
+  const closeMatches = links.filter(l => l.text.includes(normalizedLicense));
+  if (closeMatches.length > 0) return { reviewNeeded: closeMatches.map(l => l.text) };
 
   return null;
 }
+
 
 
 
