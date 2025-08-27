@@ -181,14 +181,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       responseData = await scrapeCompanyDetails(page, result as string);
     }
 
+
+    
     if (licenseNumber && !companyName) {
-      const result = await searchByLicenseNumber(page, baseUrl, licenseNumber);
-      if (!result) return res.status(404).json({ error: 'License number not found.' });
-      if ((result as any).reviewNeeded) {
-        return res.status(200).json({ review: (result as any).reviewNeeded });
-      }
-      responseData = await scrapeCompanyDetails(page, result as string);
-    }
+  const result = await searchByLicenseNumber(page, baseUrl, licenseNumber);
+
+  if (!result) return res.status(404).json({ error: 'License number not found.' });
+  if ((result as any).reviewNeeded) {
+    return res.status(200).json({ review: (result as any).reviewNeeded });
+  }
+  if ((result as any).message) {
+    return res.status(200).json(result);
+  }
+
+  // result is already the company data (no need to rescrape)
+  responseData = result;
+}
+
+
+
+
 
     if (companyName && licenseNumber) {
       const companyResult = await searchByCompanyName(page, baseUrl, companyName);
