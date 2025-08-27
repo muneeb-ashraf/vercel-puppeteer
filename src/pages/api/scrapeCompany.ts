@@ -54,7 +54,7 @@ async function searchByLicenseNumber(page: Page, baseUrl: string, lic: string) {
   );
 
 
-  if (links.length === 1) return lins[0].href;
+  if (links.length === 1) return links[0].href;
   if (links.length > 1) return links[0].href; // pick first
   if (links.length == 0) return { reviewNeeded: closeMatches.map(l => l.text) };
 
