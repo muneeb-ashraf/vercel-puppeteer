@@ -322,4 +322,4 @@ export default async function handler(
       message: `Error occurred while scraping: ${error instanceof Error ? error.message : 'Unknown error'}`
     });
   }
-}
+} 
