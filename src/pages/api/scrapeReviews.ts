@@ -76,7 +76,7 @@ export default async function handler(
 
     let rhsExists;
     try {
-    rhsExists = await page.waitForSelector('#rhs', { timeout: 60000 });
+    rhsExists = await page.waitForSelector('#rhs', { timeout: 6000 });
     } catch {
     await browser.close();
     return res.status(200).json({
