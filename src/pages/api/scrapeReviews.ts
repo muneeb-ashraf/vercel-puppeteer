@@ -74,16 +74,18 @@ export default async function handler(
     await page.keyboard.press('Enter');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-    // Check for GBP card via #rhs
-    const rhsExists = await page.$('#rhs');
-    if (!rhsExists) {
-      await browser.close();
-      return res.status(200).json({
+    let rhsExists;
+    try {
+    rhsExists = await page.waitForSelector('#rhs', { timeout: 60000 });
+    } catch {
+    await browser.close();
+    return res.status(200).json({
         success: false,
         companyName: normalizedCompanyName,
         message: 'Business is not registered in Google Maps and doesn\'t have a Google business profile.'
-      });
+    });
     }
+
 
     // Click the Reviews link inside #rhs
     const reviewsLink = await page.$('#rhs a span.PbOY2e');
