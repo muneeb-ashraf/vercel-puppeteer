@@ -18,14 +18,17 @@ export default async function handler(
       return res.status(400).json({ error: "Missing HTML content" });
     }
 
-    // Launch Puppeteer with @sparticuz/chromium
-const browser = await puppeteer.launch({
-  args: chromium.args,
-  executablePath: await chromium.executablePath(),
-  headless: chromium.headless,
-});
+    // Launch Puppeteer with Chromium for serverless
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    });
 
     const page = await browser.newPage();
+
+    // Set viewport if you need custom sizing
+    await page.setViewport({ width: 1280, height: 800 });
 
     // Load HTML directly
     await page.setContent(html, { waitUntil: "networkidle0" });
@@ -66,7 +69,7 @@ const browser = await puppeteer.launch({
 
     return res.status(200).json({ url: publicUrlData.publicUrl });
   } catch (err) {
-    console.error(err);
+    console.error("PDF generation error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 }
