@@ -64,98 +64,146 @@ async function scrapeCompanyDetails(page: Page, url: string) {
     const detailDiv = document.querySelector('.searchResultDetail');
     if (!detailDiv) return {};
 
-    const results: { [key: string]: string } = {};
+    const results: { [key: string]: any } = {};
     
-    // Find the Document Images span and its next table to exclude them
-    const documentImagesSpan = Array.from(detailDiv.querySelectorAll('span'))
-      .find(span => span.textContent?.trim() === 'Document Images');
-    
-    let documentImagesTable: Element | null = null;
-    if (documentImagesSpan) {
-      // Find the next table element after the Document Images span
-      let nextElement = documentImagesSpan.nextElementSibling;
-      while (nextElement) {
-        if (nextElement.tagName.toLowerCase() === 'table') {
-          documentImagesTable = nextElement;
-          break;
-        }
-        nextElement = nextElement.nextElementSibling;
-      }
-    }
-
-    // Get all text content but exclude Document Images section
-    const allElements = Array.from(detailDiv.querySelectorAll('*'));
-    
-    for (const element of allElements) {
-      // Skip if this element is the Document Images span or its table
-      if (element === documentImagesSpan || element === documentImagesTable) {
-        continue;
-      }
-      
-      // Skip if this element is inside the Document Images table
-      if (documentImagesTable && documentImagesTable.contains(element)) {
-        continue;
-      }
-
-      const text = element.textContent?.trim() || '';
-      
-      // Look for label-value pairs (typically in format "Label: Value" or in table cells)
-      if (element.tagName.toLowerCase() === 'td' || 
-          element.tagName.toLowerCase() === 'th' ||
-          element.tagName.toLowerCase() === 'span' ||
-          element.tagName.toLowerCase() === 'div') {
-        
-        // Check if this looks like a label (ends with colon)
-        if (text.endsWith(':')) {
-          const key = text.slice(0, -1).trim();
-          let value = '';
-          
-          // Try to find the value in the next sibling
-          if (element.nextElementSibling) {
-            value = element.nextElementSibling.textContent?.trim() || '';
-          }
-          
-          if (key && value) {
-            results[key] = value;
-          }
-        }
-        
-        // Also check for patterns like "Label: Value" in a single element
-        const colonIndex = text.indexOf(':');
-        if (colonIndex > 0 && colonIndex < text.length - 1) {
-          const key = text.substring(0, colonIndex).trim();
-          const value = text.substring(colonIndex + 1).trim();
-          
-          if (key && value && key.length < 50) { // Reasonable key length
-            results[key] = value;
-          }
-        }
-      }
-    }
-
-    // Also extract any table data in a structured way
-    const tables = Array.from(detailDiv.querySelectorAll('table'));
-    tables.forEach((table, tableIndex) => {
-      // Skip the Document Images table
-      if (table === documentImagesTable) return;
-      
-      const rows = Array.from(table.querySelectorAll('tr'));
-      rows.forEach((row, rowIndex) => {
-        const cells = Array.from(row.querySelectorAll('td, th'));
-        if (cells.length === 2) {
-          // Two-column table, likely label-value pairs
-          const key = cells[0].textContent?.trim().replace(':', '') || '';
-          const value = cells[1].textContent?.trim() || '';
-          if (key && value) {
-            results[key] = value;
-          }
-        } else if (cells.length > 2 && rowIndex === 0) {
-          // Multi-column table with headers
-          const headers = cells.map(cell => cell.textContent?.trim() || '');
-          // Store headers for potential use with subsequent rows
-          results[`table_${tableIndex}_headers`] = headers.join('|');
-        }
+    // Find and exclude Document Images section
+    const documentImagesSection = Array.from(detailDiv.querySelectorAll('.detailSection'))
+      .find(section => {
+        const span = section.querySelector('span');
+        return span && span.textContent?.trim() === 'Document Images';
       });
+
+    // Extract company name and type
+    const corporationNameDiv = detailDiv.querySelector('.corporationName');
+    if (corporationNameDiv) {
+      const paragraphs = corporationNameDiv.querySelectorAll('p');
+      if (paragraphs.length >= 2) {
+        results['Entity Type'] = paragraphs[0].textContent?.trim() || '';
+        results['Entity Name'] = paragraphs[1].textContent?.trim() || '';
+      }
+    }
+
+    // Extract all detail sections except Document Images
+    const detailSections = Array.from(detailDiv.querySelectorAll('.detailSection'));
+    
+    detailSections.forEach(section => {
+      // Skip Document Images section
+      if (section === documentImagesSection) return;
+
+      const firstSpan = section.querySelector('span');
+      if (!firstSpan) return;
+
+      const sectionTitle = firstSpan.textContent?.trim() || '';
+      
+      if (sectionTitle === 'Filing Information') {
+        // Handle Filing Information section with label-value pairs
+        const labels = section.querySelectorAll('label');
+        labels.forEach(label => {
+          const labelText = label.textContent?.trim() || '';
+          const nextSpan = label.nextElementSibling;
+          if (nextSpan && nextSpan.tagName.toLowerCase() === 'span') {
+            const value = nextSpan.textContent?.trim() || '';
+            if (labelText && value) {
+              results[labelText] = value;
+            }
+          }
+        });
+      } else if (sectionTitle === 'Annual Reports') {
+        // Handle Annual Reports table
+        const table = section.querySelector('table');
+        if (table) {
+          const annualReports: { [key: string]: string } = {};
+          const rows = Array.from(table.querySelectorAll('tr'));
+          
+          // Skip header row, process data rows
+          for (let i = 1; i < rows.length; i++) {
+            const cells = rows[i].querySelectorAll('td');
+            if (cells.length >= 2) {
+              const year = cells[0].textContent?.trim() || '';
+              const filedDate = cells[1].textContent?.trim() || '';
+              if (year && filedDate) {
+                annualReports[year] = filedDate;
+              }
+            }
+          }
+          results['Annual Reports'] = annualReports;
+        }
+      } else if (sectionTitle === 'Authorized Person(s) Detail') {
+        // Handle Authorized Persons section
+        const authorizedPersons: any[] = [];
+        const spans = Array.from(section.querySelectorAll('span'));
+        
+        let currentPerson: any = null;
+        for (const span of spans) {
+          const text = span.textContent?.trim() || '';
+          
+          if (text.startsWith('Title')) {
+            if (currentPerson) {
+              authorizedPersons.push(currentPerson);
+            }
+            currentPerson = { title: text.replace('Title', '').trim() };
+          } else if (currentPerson && text && !text.includes('Name & Address') && !text.includes('<div>')) {
+            // This might be a person's name
+            const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+            if (lines.length > 0 && !currentPerson.name) {
+              currentPerson.name = lines[0];
+              if (lines.length > 1) {
+                currentPerson.address = lines.slice(1).join(', ');
+              }
+            }
+          }
+        }
+        if (currentPerson) {
+          authorizedPersons.push(currentPerson);
+        }
+        
+        if (authorizedPersons.length > 0) {
+          results['Authorized Persons'] = authorizedPersons;
+        }
+      } else {
+        // Handle other sections (Principal Address, Mailing Address, Registered Agent, etc.)
+        const spans = Array.from(section.querySelectorAll('span'));
+        
+        if (spans.length >= 2) {
+          let sectionData: any = {};
+          
+          // Get the main content (usually in the second span)
+          for (let i = 1; i < spans.length; i++) {
+            const span = spans[i];
+            const text = span.textContent?.trim() || '';
+            
+            if (text && text !== sectionTitle) {
+              // Check for address-like content
+              const div = span.querySelector('div');
+              if (div) {
+                const addressText = div.innerHTML
+                  .replace(/<br>/g, ', ')
+                  .replace(/<[^>]*>/g, '')
+                  .trim();
+                
+                if (!sectionData.address && addressText) {
+                  sectionData.address = addressText;
+                }
+              } else if (!text.startsWith('Changed:')) {
+                if (!sectionData.name && text) {
+                  sectionData.name = text;
+                }
+              } else if (text.startsWith('Changed:')) {
+                sectionData.changed = text.replace('Changed:', '').trim();
+              }
+            }
+          }
+          
+          // Store the section data
+          if (Object.keys(sectionData).length > 0) {
+            if (sectionData.address && !sectionData.name) {
+              results[sectionTitle] = sectionData.address;
+            } else {
+              results[sectionTitle] = sectionData;
+            }
+          }
+        }
+      }
     });
 
     return results;
