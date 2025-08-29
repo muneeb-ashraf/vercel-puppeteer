@@ -82,13 +82,59 @@ export default async function handler(
     await page.type('input[name="q"], textarea[name="q"]', normalizedCompanyName);
     await page.keyboard.press('Enter');
 
-    // Wait for search results to load
-    await page.waitForSelector('#search', { timeout: 15000 });
+    // Wait for search results to load - try multiple selectors
+    const searchResultsLoaded = await Promise.race([
+      page.waitForSelector('#search', { timeout: 10000 }).then(() => 'search'),
+      page.waitForSelector('#main', { timeout: 10000 }).then(() => 'main'),
+      page.waitForSelector('.g', { timeout: 10000 }).then(() => 'results'),
+      page.waitForSelector('#res', { timeout: 10000 }).then(() => 'res'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 12000))
+    ]);
+
+    if (searchResultsLoaded === 'timeout') {
+      throw new Error('Search results failed to load');
+    }
 
     // Check if there's a Google Business Profile card on the right side
-    const gbpCardExists = await page.$('.kp-wholepage, .osrp-blk, div[data-async-context*="kp_wholepage"]');
+    // Wait a bit for dynamic content to load
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    const gbpCardExists = await page.evaluate(() => {
+      // Try multiple selectors for Google Business Profile cards
+      const selectors = [
+        '.kp-wholepage',
+        '.osrp-blk',
+        'div[data-async-context*="kp_wholepage"]',
+        '.knowledge-panel',
+        '.kp-header',
+        '.SPZz6b',
+        '[data-attrid="title"]',
+        '.qrShPb',
+        '.rhsvw'
+      ];
+      
+      for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          // Additional check to ensure it's actually a business profile
+          const hasBusinessInfo = element.querySelector('[data-attrid="kc:/collection/knowledge_panels/has_rating:rating"]') ||
+                                 element.querySelector('.Aq14fc') ||
+                                 element.textContent?.includes('★') ||
+                                 element.textContent?.includes('star') ||
+                                 element.textContent?.includes('review');
+          if (hasBusinessInfo) {
+            return true;
+          }
+        }
+      }
+      return false;
+    });
     
     if (!gbpCardExists) {
+      // Debug: Take a screenshot or log page content for debugging
+      const pageTitle = await page.title();
+      console.log('Page title:', pageTitle);
+      
       return res.status(200).json({
         success: false,
         companyName: normalizedCompanyName,
