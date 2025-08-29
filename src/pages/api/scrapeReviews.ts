@@ -49,10 +49,12 @@ export default async function handler(
       defaultViewport: { width: 1280, height: 720 },
       executablePath: await chromium.executablePath(),
       headless: true,
-      ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
+    
+    // Set ignoreHTTPSErrors on the page instead
+    await page.setRequestInterception(false);
     
     // Set user agent to avoid detection
     await page.setUserAgent(
