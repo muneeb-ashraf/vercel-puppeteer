@@ -70,7 +70,7 @@ async function scrapeCompanyDetails(page: Page, url: string) {
     const documentImagesSpan = Array.from(detailDiv.querySelectorAll('span'))
       .find(span => span.textContent?.trim() === 'Document Images');
     
-    let documentImagesTable = null;
+    let documentImagesTable: Element | null = null;
     if (documentImagesSpan) {
       // Find the next table element after the Document Images span
       let nextElement = documentImagesSpan.nextElementSibling;
