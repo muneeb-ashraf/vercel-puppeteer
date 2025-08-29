@@ -133,29 +133,23 @@ async function scrapeCompanyDetails(page: Page, url: string) {
 
 
   
-  let complaints: any[] = [];
+let complaints: any[] = [];
+
 if (complaintLink) {
   await page.goto(complaintLink, { waitUntil: "networkidle2" });
 
   complaints = await page.evaluate(() => {
-    const tables = Array.from(document.querySelectorAll("table"));
-    let targetTable: HTMLTableElement | null = null;
-
-    // Find the table that has a header row containing "Number" and "Class"
-    for (const table of tables) {
-      const headerText = table.innerText.toLowerCase();
-      if (headerText.includes("number") && headerText.includes("class")) {
-        targetTable = table as HTMLTableElement;
-        break;
-      }
-    }
+    // Select the specific table by its unique attributes
+    const targetTable = document.querySelector<HTMLTableElement>(
+      'table[style="padding: 10px 0"][cellspacing="0"][cellpadding="7"][width="100%"][border="0"][align="center"][height="50"]'
+    );
 
     if (!targetTable) return [];
 
     const rows = Array.from(targetTable.querySelectorAll("tr"));
     const data: any[] = [];
 
-    for (let i = 1; i < rows.length; i++) {  // skip header row
+    for (let i = 1; i < rows.length; i++) { // skip header row
       const cells = Array.from(rows[i].querySelectorAll("td")).map(td =>
         td.textContent?.trim() || ""
       );
