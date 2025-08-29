@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
 
 export default async function handler(
   req: NextApiRequest,
