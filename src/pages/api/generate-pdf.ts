@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
 import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 
 export default async function handler(
   req: NextApiRequest,
@@ -17,11 +18,14 @@ export default async function handler(
       return res.status(400).json({ error: "Missing HTML content" });
     }
 
-    // Launch Puppeteer
+    // Launch Puppeteer with @sparticuz/chromium
     const browser = await puppeteer.launch({
-      headless: true, 
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
+
     const page = await browser.newPage();
 
     // Load HTML directly
@@ -34,7 +38,7 @@ export default async function handler(
     // Supabase client
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL as string,
-      process.env.SUPABASE_SERVICE_ROLE_KEY as string // requires service role for write
+      process.env.SUPABASE_SERVICE_ROLE_KEY as string
     );
 
     // Unique filename
