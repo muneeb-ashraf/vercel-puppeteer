@@ -44,7 +44,7 @@ export default async function handler(
   try {
     browser = await puppeteer.launch({
       args: chromium.args,
-      defaultViewport: { width: 1280, height: 720 },
+      defaultViewport: { width: 1980, height: 720 },
       executablePath: await chromium.executablePath(),
       headless: true,
     });
