@@ -198,14 +198,30 @@ export default async function handler(
 
     // Click on reviews to open them
     try {
-      // Try to find and click "Google reviews" link using XPath
-      const reviewsLink = await page.$x("//span[contains(text(), 'Google reviews')]/ancestor::a");
-      if (reviewsLink.length > 0) {
-        await reviewsLink[0].click();
+      // Try to find and click "Google reviews" link using evaluate
+      const reviewsLinkClicked = await page.evaluate(() => {
+        // Look for spans containing "Google reviews" and find their parent links
+        const spans = document.querySelectorAll('span');
+        for (const span of spans) {
+          if (span.textContent?.includes('Google reviews')) {
+            const parentLink = span.closest('a');
+            if (parentLink) {
+              parentLink.click();
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+
+      if (reviewsLinkClicked) {
         await page.waitForNavigation({ waitUntil: 'networkidle2' });
       } else {
         // Fallback: try clicking the rating stars directly
-        await page.click('g-review-stars, .Aq14fc');
+        const ratingClicked = await page.click('g-review-stars').catch(() => false);
+        if (!ratingClicked) {
+          await page.click('.Aq14fc');
+        }
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
       
