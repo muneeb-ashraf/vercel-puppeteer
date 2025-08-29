@@ -63,7 +63,7 @@ export default async function handler(
 
     // Navigate to Google USA
     await page.goto('https://www.google.com/?gl=us&hl=en&pws=0&gws_rd=cr', {
-      waitUntil: 'networkidle0',
+      waitUntil: 'networkidle2',
       timeout: 30000
     });
 
@@ -78,22 +78,10 @@ export default async function handler(
 
     // Search for the company
     const normalizedCompanyName = normalizeCompanyName(companyName);
-    await page.waitForSelector('input[name="q"], textarea[name="q"]', { timeout: 10000 });
-    await page.type('input[name="q"], textarea[name="q"]', normalizedCompanyName);
+    await page.waitForSelector('input[name="q"]', { timeout: 10000 });
+    await page.type('input[name="q"]', normalizedCompanyName, { delay: 100 });
     await page.keyboard.press('Enter');
-
-    // Wait for search results to load - try multiple selectors
-    const searchResultsLoaded = await Promise.race([
-      page.waitForSelector('#search', { timeout: 10000 }).then(() => 'search'),
-      page.waitForSelector('#main', { timeout: 10000 }).then(() => 'main'),
-      page.waitForSelector('.g', { timeout: 10000 }).then(() => 'results'),
-      page.waitForSelector('#res', { timeout: 10000 }).then(() => 'res'),
-      new Promise((resolve) => setTimeout(() => resolve('timeout'), 12000))
-    ]);
-
-    if (searchResultsLoaded === 'timeout') {
-      throw new Error('Search results failed to load');
-    }
+    await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
     // Check if there's a Google Business Profile card on the right side
     // Wait a bit for dynamic content to load
@@ -208,60 +196,69 @@ export default async function handler(
       };
     });
 
-    // Look for and click on Reviews link/button
-    const reviewsClickable = await Promise.race([
-      page.waitForSelector('a[data-async-trigger="reviewDialog"], button[data-async-trigger="reviewDialog"]', { timeout: 5000 }).then(() => 'reviewDialog'),
-      page.waitForSelector('a[href*="reviews"], span:contains("Reviews")', { timeout: 5000 }).then(() => 'reviewsLink'),
-      page.waitForSelector('.review-dialog-list', { timeout: 2000 }).then(() => 'alreadyOpen'),
-      new Promise(resolve => setTimeout(() => resolve('timeout'), 5000))
-    ]);
-
-    if (reviewsClickable === 'reviewDialog') {
-      await page.click('a[data-async-trigger="reviewDialog"], button[data-async-trigger="reviewDialog"]');
-      await new Promise(resolve => setTimeout(resolve, 3000));
-    } else if (reviewsClickable === 'reviewsLink') {
-      await page.click('a[href*="reviews"], span:contains("Reviews")');
-      await new Promise(resolve => setTimeout(resolve, 3000));
+    // Click on reviews to open them
+    try {
+      // Try to find and click "Google reviews" link using XPath
+      const reviewsLink = await page.$x("//span[contains(text(), 'Google reviews')]/ancestor::a");
+      if (reviewsLink.length > 0) {
+        await reviewsLink[0].click();
+        await page.waitForNavigation({ waitUntil: 'networkidle2' });
+      } else {
+        // Fallback: try clicking the rating stars directly
+        await page.click('g-review-stars, .Aq14fc');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      
+      // Wait for reviews to load
+      await page.waitForSelector('.gws-localreviews__google-review', { timeout: 10000 });
+    } catch (error) {
+      console.log('Could not navigate to reviews:', error);
+      // Continue without reviews
     }
 
-    // Extract reviews
+    // Extract reviews using the correct selectors
     const reviews = await page.evaluate(() => {
-      const reviewElements = document.querySelectorAll('.gws-localreviews__google-review, .jxjCjc, div[data-review-id]');
+      const reviewElements = document.querySelectorAll('.gws-localreviews__google-review');
       const extractedReviews: ReviewData[] = [];
 
       for (let i = 0; i < Math.min(reviewElements.length, 5); i++) {
         const reviewElement = reviewElements[i];
         
-        // Extract reviewer name
-        const nameElement = reviewElement.querySelector('.TSUbDb a, .X5PpBb, .jBmLS');
-        const reviewerName = nameElement?.textContent?.trim() || 'Anonymous';
-        
-        // Extract rating
-        const ratingElement = reviewElement.querySelector('.lTi8oc, .Fam1ne .lTi8oc, [aria-label*="star"]');
-        let rating = 0;
-        if (ratingElement) {
-          const ariaLabel = ratingElement.getAttribute('aria-label') || '';
-          const ratingMatch = ariaLabel.match(/(\d+)\s*star/);
-          if (ratingMatch) {
-            rating = parseInt(ratingMatch[1]);
+        try {
+          // Extract reviewer name
+          const nameElement = reviewElement.querySelector('.TSUbDb');
+          const reviewerName = nameElement?.textContent?.trim() || 'Anonymous';
+          
+          // Extract rating from aria-label
+          const ratingElement = reviewElement.querySelector('.EBe2gf');
+          let rating = 0;
+          if (ratingElement) {
+            const ariaLabel = ratingElement.getAttribute('aria-label') || '';
+            const ratingMatch = ariaLabel.match(/(\d+(\.\d+)?)\s*star/i);
+            if (ratingMatch) {
+              rating = parseFloat(ratingMatch[1]);
+            }
           }
-        }
-        
-        // Extract review text
-        const textElement = reviewElement.querySelector('.Jtu6Td, .K7oBsc, .MyEned');
-        const reviewText = textElement?.textContent?.trim() || '';
-        
-        // Extract review date
-        const dateElement = reviewElement.querySelector('.dehysf, .p2TkOb, .AuVD');
-        const reviewDate = dateElement?.textContent?.trim() || '';
+          
+          // Extract review text
+          const textElement = reviewElement.querySelector('.Jtu6Td');
+          const reviewText = textElement?.textContent?.trim() || '';
+          
+          // Extract review date (if available)
+          const dateElement = reviewElement.querySelector('.dehysf, .AuVD');
+          const reviewDate = dateElement?.textContent?.trim() || '';
 
-        if (reviewerName && (rating > 0 || reviewText)) {
-          extractedReviews.push({
-            reviewerName,
-            rating,
-            reviewText,
-            reviewDate
-          });
+          if (reviewerName !== 'Anonymous' || reviewText) {
+            extractedReviews.push({
+              reviewerName,
+              rating,
+              reviewText,
+              reviewDate
+            });
+          }
+        } catch (err) {
+          console.log('Error extracting review:', err);
+          continue;
         }
       }
       
@@ -270,19 +267,29 @@ export default async function handler(
 
     await browser.close();
 
-    if (reviews.length === 0 && businessInfo.overallRating === 0) {
+    // Get business name from the page if possible
+    let businessName = normalizedCompanyName;
+    try {
+      businessName = await page.evaluate(() => {
+        const nameElement = document.querySelector('h2[data-attrid="title"], .qrShPb h2, .kp-header h2');
+        return nameElement?.textContent?.trim() || '';
+      }) || normalizedCompanyName;
+    } catch (e) {
+      // Use normalized name as fallback
+    }
+
+    if (reviews.length === 0 && overallRating === 0) {
       return res.status(200).json({
         success: false,
-        companyName: normalizedCompanyName,
+        companyName: businessName,
         message: 'Business found but no reviews data could be extracted.'
       });
     }
 
     return res.status(200).json({
       success: true,
-      companyName: businessInfo.businessName || normalizedCompanyName,
-      overallRating: businessInfo.overallRating,
-      totalReviews: businessInfo.totalReviews,
+      companyName: businessName,
+      overallRating: overallRating,
       reviews: reviews.slice(0, 5)
     });
 
