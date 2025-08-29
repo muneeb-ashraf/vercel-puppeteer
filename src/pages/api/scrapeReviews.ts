@@ -71,7 +71,7 @@ export default async function handler(
     try {
       await page.waitForSelector('button[id*="accept"], button[id*="consent"]', { timeout: 3000 });
       await page.click('button[id*="accept"], button[id*="consent"]');
-      await page.waitForTimeout(1000);
+      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e) {
       // Cookie consent not found, continue
     }
@@ -172,10 +172,10 @@ export default async function handler(
 
     if (reviewsClickable === 'reviewDialog') {
       await page.click('a[data-async-trigger="reviewDialog"], button[data-async-trigger="reviewDialog"]');
-      await page.waitForTimeout(3000);
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } else if (reviewsClickable === 'reviewsLink') {
       await page.click('a[href*="reviews"], span:contains("Reviews")');
-      await page.waitForTimeout(3000);
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
     // Extract reviews
