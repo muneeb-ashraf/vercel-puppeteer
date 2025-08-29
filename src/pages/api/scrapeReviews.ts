@@ -70,8 +70,8 @@ export default async function handler(
     } catch {}
 
     const normalizedCompanyName = normalizeCompanyName(companyName);
-    await page.waitForSelector('input[name="q"]', { timeout: 10000 });
-    await page.type('input[name="q"]', normalizedCompanyName, { delay: 100 });
+    await page.waitForSelector('textarea[name="q"]', { timeout: 10000 });
+    await page.type('textarea[name="q"]', normalizedCompanyName, { delay: 100 });
     await page.keyboard.press('Enter');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
