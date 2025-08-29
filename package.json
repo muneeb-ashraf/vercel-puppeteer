@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
     "puppeteer-core": "^24.0.0",
     "@sparticuz/chromium": "^138.0.0",
     "@types/node": "18.15.3",
