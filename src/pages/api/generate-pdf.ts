@@ -19,7 +19,7 @@ export default async function handler(
 
     // Launch Puppeteer
     const browser = await puppeteer.launch({
-      headless: "new", // better for latest Puppeteer versions
+      headless: true, 
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
     const page = await browser.newPage();
