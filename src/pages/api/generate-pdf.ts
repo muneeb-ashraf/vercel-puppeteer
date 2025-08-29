@@ -19,11 +19,11 @@ export default async function handler(
     }
 
     // Launch Puppeteer with Chromium for serverless
-    const browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    });
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(),
+    headless: true, // always safe for serverless
+  });
 
     const page = await browser.newPage();
 
