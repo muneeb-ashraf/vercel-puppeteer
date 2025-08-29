@@ -14,7 +14,6 @@ interface ScrapedData {
   success: boolean;
   companyName: string;
   overallRating?: number;
-  totalReviews?: number;
   reviews?: ReviewData[];
   message?: string;
 }
@@ -52,61 +51,33 @@ export default async function handler(
 
     const page = await browser.newPage();
 
-    await page.setRequestInterception(false);
-
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     );
 
+    // Go to Google US
     await page.goto('https://www.google.com/?gl=us&hl=en&pws=0&gws_rd=cr', {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
 
+    // Handle cookie popup
     try {
       await page.waitForSelector('button[id*="accept"], button[id*="consent"]', { timeout: 3000 });
       await page.click('button[id*="accept"], button[id*="consent"]');
-      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch {}
 
+    // Search company
     const normalizedCompanyName = normalizeCompanyName(companyName);
     await page.waitForSelector('textarea[name="q"]', { timeout: 10000 });
     await page.type('textarea[name="q"]', normalizedCompanyName, { delay: 100 });
     await page.keyboard.press('Enter');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const gbpCardExists = await page.evaluate(() => {
-      const selectors = [
-        '.kp-wholepage',
-        '.osrp-blk',
-        'div[data-async-context*="kp_wholepage"]',
-        '.knowledge-panel',
-        '.kp-header',
-        '.SPZz6b',
-        '[data-attrid="title"]',
-        '.qrShPb',
-        '.rhsvw'
-      ];
-
-      for (const selector of selectors) {
-        const element = document.querySelector(selector);
-        if (element) {
-          const hasBusinessInfo = element.querySelector('[data-attrid="kc:/collection/knowledge_panels/has_rating:rating"]') ||
-            element.querySelector('.Aq14fc') ||
-            element.textContent?.includes('★') ||
-            element.textContent?.includes('star') ||
-            element.textContent?.includes('review');
-          if (hasBusinessInfo) {
-            return true;
-          }
-        }
-      }
-      return false;
-    });
-
-    if (!gbpCardExists) {
+    // Check for GBP card via #rhs
+    const rhsExists = await page.$('#rhs');
+    if (!rhsExists) {
+      await browser.close();
       return res.status(200).json({
         success: false,
         companyName: normalizedCompanyName,
@@ -114,163 +85,69 @@ export default async function handler(
       });
     }
 
-    // Extract business info
-    const businessInfo = await page.evaluate(() => {
-      const nameSelectors = [
-        'h2[data-attrid="title"]',
-        '.qrShPb h2',
-        '.kp-header h2',
-        '.SPZz6b h2'
-      ];
-      let businessName = '';
-      for (const selector of nameSelectors) {
-        const element = document.querySelector(selector);
-        if (element) {
-          businessName = element.textContent?.trim() || '';
-          break;
-        }
-      }
-
-      const ratingSelectors = [
-        'span[data-attrid="kc:/collection/knowledge_panels/has_rating:rating"] span',
-        '.Aq14fc',
-        '.kp-header .AuVD'
-      ];
-      let overallRating = 0;
-      for (const selector of ratingSelectors) {
-        const element = document.querySelector(selector);
-        if (element) {
-          const ratingText = element.textContent?.trim();
-          const rating = parseFloat(ratingText || '0');
-          if (!isNaN(rating)) {
-            overallRating = rating;
-            break;
-          }
-        }
-      }
-
-      const reviewCountSelectors = [
-        'span[data-attrid="kc:/collection/knowledge_panels/has_rating:num_ratings"]',
-        '.AuVD span:last-child',
-        '.hqzQac span'
-      ];
-      let totalReviews = 0;
-      for (const selector of reviewCountSelectors) {
-        const element = document.querySelector(selector);
-        if (element) {
-          const countText = element.textContent?.trim() || '';
-          const match = countText.match(/[\d,]+/);
-          if (match) {
-            totalReviews = parseInt(match[0].replace(/,/g, ''));
-            break;
-          }
-        }
-      }
-
-      return {
-        businessName,
-        overallRating,
-        totalReviews
-      };
-    });
-
-    // Destructure for use outside
-    const { businessName: extractedBusinessName, overallRating, totalReviews } = businessInfo;
-
-    try {
-      const reviewsLinkClicked = await page.evaluate(() => {
-        const reviewsLink = document.querySelector('a[data-fid] span');
-        if (reviewsLink && reviewsLink.textContent?.includes('Google review')) {
-          const parentLink = reviewsLink.closest('a');
-          if (parentLink) {
-            parentLink.click();
-            return true;
-          }
-        }
-        return false;
+    // Click the Reviews link inside #rhs
+    const reviewsLink = await page.$('#rhs a span.PbOY2e');
+    if (!reviewsLink) {
+      await browser.close();
+      return res.status(200).json({
+        success: false,
+        companyName: normalizedCompanyName,
+        message: 'Business has GBP card but no Reviews link found.'
       });
-
-      if (reviewsLinkClicked) {
-        await page.waitForNavigation({ waitUntil: 'networkidle2' });
-      } else {
-        const ratingClicked = await page.click('.Aq14fc').catch(() => false);
-        if (!ratingClicked) {
-          await page.click('.z3HNkc, .gTPtFb');
-        }
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-
-      await page.waitForSelector('.gws-localreviews__google-review', { timeout: 10000 });
-    } catch (error) {
-      console.log('Could not navigate to reviews:', error);
     }
 
-    const reviews = await page.evaluate(() => {
-      const reviewElements = document.querySelectorAll('.gws-localreviews__google-review');
-      const extractedReviews: ReviewData[] = [];
+    await reviewsLink.click();
+    await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-      for (let i = 0; i < Math.min(reviewElements.length, 5); i++) {
-        const reviewElement = reviewElements[i];
+    // Extract rating
+    const overallRating = await page.evaluate(() => {
+      const ratingEl = document.querySelector('g-review-stars span[aria-label]');
+      if (!ratingEl) return 0;
+      const label = ratingEl.getAttribute('aria-label') || '';
+      const match = label.match(/Rated\s([\d.]+)\s*out of/i);
+      return match ? parseFloat(match[1]) : 0;
+    });
 
-        try {
-          const nameElement = reviewElement.querySelector('.TSUbDb');
-          const reviewerName = nameElement?.textContent?.trim() || 'Anonymous';
+    // Extract reviews under div[data-attrid="kc:/local:all reviews"]
+    const reviews: ReviewData[] = await page.evaluate(() => {
+      const container = document.querySelector('div[data-attrid="kc:/local:all reviews"]');
+      if (!container) return [];
 
-          const ratingElement = reviewElement.querySelector('.EBe2gf');
-          let rating = 0;
-          if (ratingElement) {
-            const ariaLabel = ratingElement.getAttribute('aria-label') || '';
-            const ratingMatch = ariaLabel.match(/(\d+(\.\d+)?)\s*star/i);
-            if (ratingMatch) {
-              rating = parseFloat(ratingMatch[1]);
-            }
-          }
+      const reviewDivs = container.querySelectorAll('div');
+      const extracted: ReviewData[] = [];
 
-          const textElement = reviewElement.querySelector('.Jtu6Td');
-          const reviewText = textElement?.textContent?.trim() || '';
-
-          const dateElement = reviewElement.querySelector('.dehysf, .AuVD');
-          const reviewDate = dateElement?.textContent?.trim() || '';
-
-          if (reviewerName !== 'Anonymous' || reviewText) {
-            extractedReviews.push({
-              reviewerName,
-              rating,
-              reviewText,
-              reviewDate
-            });
-          }
-        } catch {
-          continue;
+      reviewDivs.forEach(div => {
+        const reviewerName = div.querySelector('.TSUbDb')?.textContent?.trim() || 'Anonymous';
+        const ratingEl = div.querySelector('span[aria-label*="star"]');
+        let rating = 0;
+        if (ratingEl) {
+          const match = ratingEl.getAttribute('aria-label')?.match(/(\d+(\.\d+)?)/);
+          if (match) rating = parseFloat(match[0]);
         }
-      }
+        const reviewText = div.querySelector('.Jtu6Td')?.textContent?.trim() || '';
+        const reviewDate = div.querySelector('.dehysf, .AuVD')?.textContent?.trim() || '';
 
-      return extractedReviews;
+        if (reviewText) {
+          extracted.push({ reviewerName, rating, reviewText, reviewDate });
+        }
+      });
+
+      return extracted.slice(0, 5);
     });
 
     await browser.close();
 
-    if (reviews.length === 0 && overallRating === 0) {
-      return res.status(200).json({
-        success: false,
-        companyName: extractedBusinessName || normalizedCompanyName,
-        message: 'Business found but no reviews data could be extracted.'
-      });
-    }
-
     return res.status(200).json({
       success: true,
-      companyName: extractedBusinessName || normalizedCompanyName,
+      companyName: normalizedCompanyName,
       overallRating,
-      totalReviews,
-      reviews: reviews.slice(0, 5)
+      reviews
     });
 
   } catch (error) {
     console.error('Scraping error:', error);
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
+
     return res.status(500).json({
       success: false,
       companyName: companyName || '',
