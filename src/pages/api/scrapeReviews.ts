@@ -201,7 +201,7 @@ export default async function handler(
       // Try to find and click "Google reviews" link using evaluate
       const reviewsLinkClicked = await page.evaluate(() => {
         // Look for spans containing "Google reviews" and find their parent links
-        const spans = document.querySelectorAll('span');
+        const spans = Array.from(document.querySelectorAll('span'));
         for (const span of spans) {
           if (span.textContent?.includes('Google reviews')) {
             const parentLink = span.closest('a');
