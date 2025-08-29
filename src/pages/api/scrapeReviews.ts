@@ -198,17 +198,15 @@ export default async function handler(
 
     // Click on reviews to open them
     try {
-      // Try to find and click "Google reviews" link using evaluate
+      // Try to find and click the Google reviews link
       const reviewsLinkClicked = await page.evaluate(() => {
-        // Look for spans containing "Google reviews" and find their parent links
-        const spans = Array.from(document.querySelectorAll('span'));
-        for (const span of spans) {
-          if (span.textContent?.includes('Google reviews')) {
-            const parentLink = span.closest('a');
-            if (parentLink) {
-              parentLink.click();
-              return true;
-            }
+        // Look for the specific reviews link from the HTML structure
+        const reviewsLink = document.querySelector('a[data-fid] span');
+        if (reviewsLink && reviewsLink.textContent?.includes('Google review')) {
+          const parentLink = reviewsLink.closest('a');
+          if (parentLink) {
+            parentLink.click();
+            return true;
           }
         }
         return false;
@@ -217,10 +215,11 @@ export default async function handler(
       if (reviewsLinkClicked) {
         await page.waitForNavigation({ waitUntil: 'networkidle2' });
       } else {
-        // Fallback: try clicking the rating stars directly
-        const ratingClicked = await page.click('g-review-stars').catch(() => false);
+        // Fallback: try clicking the rating directly
+        const ratingClicked = await page.click('.Aq14fc').catch(() => false);
         if (!ratingClicked) {
-          await page.click('.Aq14fc');
+          // Try clicking the star rating area
+          await page.click('.z3HNkc, .gTPtFb');
         }
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
@@ -229,7 +228,7 @@ export default async function handler(
       await page.waitForSelector('.gws-localreviews__google-review', { timeout: 10000 });
     } catch (error) {
       console.log('Could not navigate to reviews:', error);
-      // Continue without reviews
+      // Continue without reviews - we still have the overall rating
     }
 
     // Extract reviews using the correct selectors
@@ -281,11 +280,14 @@ export default async function handler(
       return extractedReviews;
     });
 
-    // Get business name from the page if possible
+    // Get business name from the page using exact selector from HTML
     let businessName = normalizedCompanyName;
     try {
       businessName = await page.evaluate(() => {
-        const nameElement = document.querySelector('h2[data-attrid="title"], .qrShPb h2, .kp-header h2');
+        // Use the exact selector from the provided HTML structure
+        const nameElement = document.querySelector('h2.qrShPb span') || 
+                           document.querySelector('h2[data-attrid="title"] span') ||
+                           document.querySelector('.SPZz6b h2 span');
         return nameElement?.textContent?.trim() || '';
       }) || normalizedCompanyName;
     } catch (e) {
