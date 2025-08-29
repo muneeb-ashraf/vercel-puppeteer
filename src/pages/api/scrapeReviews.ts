@@ -281,8 +281,6 @@ export default async function handler(
       return extractedReviews;
     });
 
-    await browser.close();
-
     // Get business name from the page if possible
     let businessName = normalizedCompanyName;
     try {
@@ -293,6 +291,8 @@ export default async function handler(
     } catch (e) {
       // Use normalized name as fallback
     }
+
+    await browser.close();
 
     if (reviews.length === 0 && overallRating === 0) {
       return res.status(200).json({
