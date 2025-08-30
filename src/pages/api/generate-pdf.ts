@@ -19,34 +19,22 @@ export default async function handler(
     }
 
     // Launch Puppeteer with Chromium for serverless
-    const browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath(),
-      headless: true, // always safe for serverless
-    });
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(),
+    headless: true, // always safe for serverless
+  });
 
     const page = await browser.newPage();
 
-    // Set viewport to match desired PDF dimensions
+    // Set viewport if you need custom sizing
     await page.setViewport({ width: 1920, height: 1080 });
 
     // Load HTML directly
     await page.setContent(html, { waitUntil: "networkidle0" });
 
-    // Generate PDF with custom dimensions (1920x1080 pixels)
-    // Convert pixels to points for PDF (1 pixel ≈ 0.75 points)
-    const pdfBuffer = await page.pdf({
-      width: '1920px',
-      height: '1080px',
-      printBackground: true, // Include background colors/images
-      margin: {
-        top: 0,
-        right: 0,
-        bottom: 0,
-        left: 0
-      }
-    });
-    
+    // Generate PDF
+    const pdfBuffer = await page.pdf({ format: "A4" });
     await browser.close();
 
     // Supabase client
