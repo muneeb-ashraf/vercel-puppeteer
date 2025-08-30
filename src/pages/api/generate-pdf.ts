@@ -28,7 +28,7 @@ export default async function handler(
     const page = await browser.newPage();
 
     // Set viewport if you need custom sizing
-    await page.setViewport({ width: 1280, height: 800 });
+    await page.setViewport({ width: 1920, height: 1080 });
 
     // Load HTML directly
     await page.setContent(html, { waitUntil: "networkidle0" });
