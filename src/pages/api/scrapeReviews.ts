@@ -151,7 +151,7 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
       console.log(`[GOOGLE_REVIEWS_DEBUG] No results found for "${companyName}" in Florida`);
       return {
         success: false,
-        message: "This company doesn't have any reviews available from its customers.",
+        message: "There are no customer reviews available for this company.",
         rating: null,
         reviews: [],
         business_found: false
@@ -214,7 +214,7 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
       console.log(`[GOOGLE_REVIEWS_DEBUG] No matching company found for "${companyName}"`);
       return {
         success: false,
-        message: "This company doesn't have any reviews available from its customers.",
+        message: "There are no customer reviews available for this company.",
         rating: null,
         reviews: [],
         business_found: false
@@ -277,7 +277,7 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
       console.log(`[GOOGLE_REVIEWS_DEBUG] Business "${placeDetails.name}" is not located in Florida`);
       return {
         success: false,
-        message: "This company doesn't have any reviews available from its customers.",
+        message: "There are no customer reviews available for this company.",
         rating: null,
         reviews: [],
         business_found: false
@@ -315,7 +315,7 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
       console.log(`[GOOGLE_REVIEWS_DEBUG] No reviews found for business: ${placeDetails.name}`);
       return {
         success: false,
-        message: "This company doesn't have any reviews available from its customers.",
+        message: "There are no customer reviews available for this company.",
         rating: rating,
         total_ratings: totalRatings,
         reviews: [],
