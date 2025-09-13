@@ -1,159 +1,416 @@
+import { createClient } from '@supabase/supabase-js';
 import { NextApiRequest, NextApiResponse } from 'next';
-import chromium from '@sparticuz/chromium';
-import puppeteer from 'puppeteer-core';
-import { normalizeCompanyName } from "@/utils/normalizeCompanyName";
 
-interface ReviewData {
-  reviewerName: string;
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+// Type definitions
+interface GooglePlaceSearchResult {
+  place_id: string;
+  name: string;
+  rating?: number;
+  user_ratings_total?: number;
+  vicinity?: string;
+  types?: string[];
+}
+
+interface GooglePlaceSearchResponse {
+  status: string;
+  results: GooglePlaceSearchResult[];
+  error_message?: string;
+}
+
+interface GoogleReview {
+  author_name: string;
   rating: number;
-  reviewText: string;
-  reviewDate: string;
+  text: string;
+  time: number;
+  relative_time_description: string;
+  profile_photo_url?: string;
 }
 
-interface ScrapedData {
+interface GooglePlaceDetails {
+  name: string;
+  rating?: number;
+  user_ratings_total?: number;
+  reviews?: GoogleReview[];
+  formatted_address?: string;
+  formatted_phone_number?: string;
+  website?: string;
+}
+
+interface GooglePlaceDetailsResponse {
+  status: string;
+  result: GooglePlaceDetails;
+  error_message?: string;
+}
+
+interface ProcessedReview {
+  author_name: string;
+  rating: number;
+  text: string;
+  time: number;
+  relative_time_description: string;
+  profile_photo_url?: string;
+}
+
+interface ReviewsData {
   success: boolean;
-  companyName: string;
-  overallRating?: number;
-  reviews?: ReviewData[];
-  message?: string;
+  message: string;
+  rating: number | null;
+  total_ratings?: number;
+  reviews: {
+    positive: ProcessedReview[];
+    negative: ProcessedReview[];
+    all: ProcessedReview[];
+  } | ProcessedReview[];
+  business_found: boolean;
+  business_name?: string;
+  business_address?: string;
+  business_phone?: string;
+  business_website?: string;
+  search_query?: string;
+  place_id?: string;
+  error?: string;
 }
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<ScrapedData>
-) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({
-      success: false,
-      companyName: '',
-      message: 'Method not allowed. Use POST request.'
-    });
-  }
+interface ApiRequest extends NextApiRequest {
+  body: {
+    companyName: string;
+    state?: string;
+  };
+}
 
-  const { companyName } = req.body;
-
-  if (!companyName) {
-    return res.status(400).json({
-      success: false,
-      companyName: '',
-      message: 'Company name is required.'
-    });
-  }
-
-  let browser;
+/**
+ * Fetch Google Reviews for a business using Google Places API
+ * Following the Stack Overflow approach: first get place_id, then fetch reviews
+ * @param companyName - The name of the company to search for
+ * @param state - The state to search in (default: Florida)
+ * @returns Reviews data with rating and reviews
+ */
+async function fetchGoogleReviews(companyName: string, state: string = 'Florida'): Promise<ReviewsData> {
   try {
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: { width: 1980, height: 720 },
-      executablePath: await chromium.executablePath(),
-      headless: true,
-    });
-
-    const page = await browser.newPage();
-
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    );
-
-    // Go to Google US
-    await page.goto('https://www.google.com/?gl=us&hl=en&pws=0&gws_rd=cr', {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
-
-    // Handle cookie popup
-    try {
-      await page.waitForSelector('button[id*="accept"], button[id*="consent"]', { timeout: 3000 });
-      await page.click('button[id*="accept"], button[id*="consent"]');
-    } catch {}
-
-    // Search company
-    const normalizedCompanyName = normalizeCompanyName(companyName);
-    await page.waitForSelector('textarea[name="q"]', { timeout: 10000 });
-    await page.type('textarea[name="q"]', normalizedCompanyName, { delay: 100 });
-    await page.keyboard.press('Enter');
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
-
-    let rhsExists;
-    try {
-    rhsExists = await page.waitForSelector('#rhs', { timeout: 6000 });
-    } catch {
-    await browser.close();
-    return res.status(200).json({
-        success: false,
-        companyName: normalizedCompanyName,
-        message: 'Business is not registered in Google Maps and doesn\'t have a Google business profile.'
-    });
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Starting Google Reviews fetch for: "${companyName}" in ${state}`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Timestamp: ${new Date().toISOString()}`);
+    
+    const googleApiKey = process.env.GOOGLE_PLACES_API_KEY;
+    if (!googleApiKey) {
+      console.error(`[GOOGLE_REVIEWS_DEBUG] ERROR: Google Places API key not configured`);
+      console.log(`[GOOGLE_REVIEWS_DEBUG] Available env vars:`, Object.keys(process.env).filter(key => key.includes('GOOGLE') || key.includes('API')));
+      throw new Error('Google Places API key not configured');
     }
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] API key found: ${googleApiKey.substring(0, 10)}...`);
 
-
-    // Click the Reviews link inside #rhs
-    const reviewsLink = await page.$('#rhs a span.PbOY2e');
-    if (!reviewsLink) {
-      await browser.close();
-      return res.status(200).json({
-        success: false,
-        companyName: normalizedCompanyName,
-        message: 'Business has GBP card but no Reviews link found.'
+    // Step 1: Search for the business using Text Search to get place_id
+    const searchQuery = `${companyName} ${state}`;
+    const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(searchQuery)}&key=${googleApiKey}`;
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 1: Searching Google Places for place_id`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Search query: "${searchQuery}"`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Search URL: ${searchUrl.replace(googleApiKey, 'API_KEY_HIDDEN')}`);
+    
+    const searchResponse = await fetch(searchUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Google-Reviews-API/1.0'
+      }
+    });
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Search response status: ${searchResponse.status} ${searchResponse.statusText}`);
+    
+    if (!searchResponse.ok) {
+      console.error(`[GOOGLE_REVIEWS_DEBUG] ERROR: Google Places API search failed: ${searchResponse.status} ${searchResponse.statusText}`);
+      throw new Error(`Google Places API search failed: ${searchResponse.status} ${searchResponse.statusText}`);
+    }
+    
+    const searchData: GooglePlaceSearchResponse = await searchResponse.json();
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Google Places search response status: ${searchData.status}`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Search results count: ${searchData.results?.length || 0}`);
+    
+    if (searchData.results && searchData.results.length > 0) {
+      console.log(`[GOOGLE_REVIEWS_DEBUG] First result:`, {
+        name: searchData.results[0].name,
+        place_id: searchData.results[0].place_id,
+        rating: searchData.results[0].rating,
+        user_ratings_total: searchData.results[0].user_ratings_total
       });
     }
+    
+    if (searchData.status !== 'OK' && searchData.status !== 'ZERO_RESULTS') {
+      console.error(`[GOOGLE_REVIEWS_DEBUG] ERROR: Google Places API error: ${searchData.status} - ${searchData.error_message || 'Unknown error'}`);
+      throw new Error(`Google Places API error: ${searchData.status} - ${searchData.error_message || 'Unknown error'}`);
+    }
+    
+    if (!searchData.results || searchData.results.length === 0) {
+      console.log(`[GOOGLE_REVIEWS_DEBUG] No results found for "${companyName}" in ${state}`);
+      return {
+        success: false,
+        message: `No Google business listing found for "${companyName}" in ${state}`,
+        rating: null,
+        reviews: [],
+        business_found: false
+      };
+    }
 
-    await reviewsLink.click();
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
-
-    // Extract rating
-    const overallRating = await page.evaluate(() => {
-      const ratingEl = document.querySelector('g-review-stars span[aria-label]');
-      if (!ratingEl) return 0;
-      const label = ratingEl.getAttribute('aria-label') || '';
-      const match = label.match(/Rated\s([\d.]+)\s*out of/i);
-      return match ? parseFloat(match[1]) : 0;
+    // Step 2: Get the first result (most relevant) and extract place_id
+    const business = searchData.results[0];
+    const placeId = business.place_id;
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 2: Found business: ${business.name} (Place ID: ${placeId})`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Business details:`, {
+      name: business.name,
+      rating: business.rating,
+      user_ratings_total: business.user_ratings_total,
+      vicinity: business.vicinity,
+      types: business.types
     });
-
-    // Extract reviews under div[data-attrid="kc:/local:all reviews"]
-    const reviews: ReviewData[] = await page.evaluate(() => {
-      const container = document.querySelector('div[data-attrid="kc:/local:all reviews"]');
-      if (!container) return [];
-
-      const reviewDivs = container.querySelectorAll('div');
-      const extracted: ReviewData[] = [];
-
-      reviewDivs.forEach(div => {
-        const reviewerName = div.querySelector('.TSUbDb')?.textContent?.trim() || 'Anonymous';
-        const ratingEl = div.querySelector('span[aria-label*="star"]');
-        let rating = 0;
-        if (ratingEl) {
-          const match = ratingEl.getAttribute('aria-label')?.match(/(\d+(\.\d+)?)/);
-          if (match) rating = parseFloat(match[0]);
-        }
-        const reviewText = div.querySelector('.Jtu6Td')?.textContent?.trim() || '';
-        const reviewDate = div.querySelector('.dehysf, .AuVD')?.textContent?.trim() || '';
-
-        if (reviewText) {
-          extracted.push({ reviewerName, rating, reviewText, reviewDate });
-        }
+    
+    // Step 3: Use place_id to fetch detailed reviews using REST API
+    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,rating,user_ratings_total,reviews,formatted_address,formatted_phone_number,website&key=${googleApiKey}`;
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 3: Fetching reviews for place_id: ${placeId}`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Details URL: ${detailsUrl.replace(googleApiKey, 'API_KEY_HIDDEN')}`);
+    
+    const detailsResponse = await fetch(detailsUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Google-Reviews-API/1.0'
+      }
+    });
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Details response status: ${detailsResponse.status} ${detailsResponse.statusText}`);
+    
+    if (!detailsResponse.ok) {
+      console.error(`[GOOGLE_REVIEWS_DEBUG] ERROR: Google Places Details API failed: ${detailsResponse.status} ${detailsResponse.statusText}`);
+      throw new Error(`Google Places Details API failed: ${detailsResponse.status} ${detailsResponse.statusText}`);
+    }
+    
+    const detailsData: GooglePlaceDetailsResponse = await detailsResponse.json();
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Google Places details response status: ${detailsData.status}`);
+    
+    if (detailsData.status !== 'OK') {
+      console.error(`[GOOGLE_REVIEWS_DEBUG] ERROR: Google Places Details API error: ${detailsData.status} - ${detailsData.error_message || 'Unknown error'}`);
+      throw new Error(`Google Places Details API error: ${detailsData.status} - ${detailsData.error_message || 'Unknown error'}`);
+    }
+    
+    const placeDetails = detailsData.result;
+    
+    // Step 4: Process reviews data
+    const reviews = placeDetails.reviews || [];
+    const rating = placeDetails.rating || null;
+    const totalRatings = placeDetails.user_ratings_total || 0;
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 4: Processing reviews data`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Place details:`, {
+      name: placeDetails.name,
+      rating: rating,
+      total_ratings: totalRatings,
+      reviews_count: reviews.length,
+      formatted_address: placeDetails.formatted_address,
+      formatted_phone_number: placeDetails.formatted_phone_number,
+      website: placeDetails.website
+    });
+    
+    if (reviews.length > 0) {
+      console.log(`[GOOGLE_REVIEWS_DEBUG] Sample review:`, {
+        author_name: reviews[0].author_name,
+        rating: reviews[0].rating,
+        text_length: reviews[0].text?.length || 0,
+        time: reviews[0].time
       });
-
-      return extracted.slice(0, 5);
+    }
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Processing ${reviews.length} reviews for ${placeDetails.name}`);
+    
+    if (reviews.length === 0) {
+      console.log(`[GOOGLE_REVIEWS_DEBUG] No reviews found for business: ${placeDetails.name}`);
+      return {
+        success: true,
+        message: `Business "${placeDetails.name}" found but has no customer reviews available`,
+        rating: rating,
+        total_ratings: totalRatings,
+        reviews: [],
+        business_found: true,
+        business_name: placeDetails.name,
+        business_address: placeDetails.formatted_address,
+        business_phone: placeDetails.formatted_phone_number,
+        business_website: placeDetails.website,
+        place_id: placeId
+      };
+    }
+    
+    // Step 5: Categorize and sort reviews
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 5: Processing and categorizing reviews`);
+    
+    const processedReviews: ProcessedReview[] = reviews.map(review => ({
+      author_name: review.author_name,
+      rating: review.rating,
+      text: review.text,
+      time: review.time,
+      relative_time_description: review.relative_time_description,
+      profile_photo_url: review.profile_photo_url
+    }));
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Processed ${processedReviews.length} reviews`);
+    
+    // Sort reviews by rating (highest first)
+    const sortedReviews = processedReviews.sort((a, b) => b.rating - a.rating);
+    
+    // Get top positive reviews (rating >= 4)
+    const positiveReviews = sortedReviews.filter(review => review.rating >= 4).slice(0, 3);
+    
+    // Get top negative reviews (rating <= 2)
+    const negativeReviews = sortedReviews.filter(review => review.rating <= 2).slice(0, 3);
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Successfully processed ${sortedReviews.length} reviews (${positiveReviews.length} positive, ${negativeReviews.length} negative)`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Rating distribution:`, {
+      '5 stars': sortedReviews.filter(r => r.rating === 5).length,
+      '4 stars': sortedReviews.filter(r => r.rating === 4).length,
+      '3 stars': sortedReviews.filter(r => r.rating === 3).length,
+      '2 stars': sortedReviews.filter(r => r.rating === 2).length,
+      '1 star': sortedReviews.filter(r => r.rating === 1).length
     });
-
-    await browser.close();
-
-    return res.status(200).json({
+    
+    const finalResult: ReviewsData = {
       success: true,
-      companyName: normalizedCompanyName,
-      overallRating,
-      reviews
+      message: `Successfully retrieved reviews for "${placeDetails.name}"`,
+      rating: rating,
+      total_ratings: totalRatings,
+      reviews: {
+        positive: positiveReviews,
+        negative: negativeReviews,
+        all: sortedReviews.slice(0, 10) // Top 10 reviews overall
+      },
+      business_found: true,
+      business_name: placeDetails.name,
+      business_address: placeDetails.formatted_address,
+      business_phone: placeDetails.formatted_phone_number,
+      business_website: placeDetails.website,
+      search_query: searchQuery,
+      place_id: placeId
+    };
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Final result summary:`, {
+      success: finalResult.success,
+      business_found: finalResult.business_found,
+      rating: finalResult.rating,
+      total_ratings: finalResult.total_ratings,
+      positive_reviews: (finalResult.reviews as any).positive.length,
+      negative_reviews: (finalResult.reviews as any).negative.length,
+      all_reviews: (finalResult.reviews as any).all.length,
+      business_name: finalResult.business_name
     });
-
+    
+    return finalResult;
+    
   } catch (error) {
-    console.error('Scraping error:', error);
-    if (browser) await browser.close();
+    console.error(`[GOOGLE_REVIEWS_DEBUG] ERROR: Error fetching Google Reviews:`, error);
+    console.error(`[GOOGLE_REVIEWS_DEBUG] ERROR: Stack trace:`, (error as Error).stack);
+    return {
+      success: false,
+      error: (error as Error).message,
+      message: `Failed to retrieve Google Reviews for "${companyName}": ${(error as Error).message}`,
+      rating: null,
+      reviews: [],
+      business_found: false
+    };
+  }
+}
 
+/**
+ * Main handler for the Google Reviews API endpoint
+ */
+export default async function handler(req: ApiRequest, res: NextApiResponse<ReviewsData | { error: string; success: boolean; message?: string; debug?: any }>) {
+  console.log(`[GOOGLE_REVIEWS_API_DEBUG] Handler called with method: ${req.method}`);
+  console.log(`[GOOGLE_REVIEWS_API_DEBUG] Request URL: ${req.url}`);
+  console.log(`[GOOGLE_REVIEWS_API_DEBUG] Request headers:`, req.headers);
+  console.log(`[GOOGLE_REVIEWS_API_DEBUG] Timestamp: ${new Date().toISOString()}`);
+  
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    console.log(`[GOOGLE_REVIEWS_API_DEBUG] Handling OPTIONS request`);
+    res.status(200).end();
+    return;
+  }
+  
+  if (req.method !== 'POST') {
+    console.log(`[GOOGLE_REVIEWS_API_DEBUG] ERROR: Method ${req.method} not allowed, returning 405`);
+    return res.status(405).json({ 
+      error: 'Method not allowed',
+      message: `Only POST method is supported, received: ${req.method}`,
+      success: false,
+      debug: {
+        method: req.method,
+        url: req.url,
+        headers: req.headers
+      }
+    });
+  }
+  
+  try {
+    console.log(`[GOOGLE_REVIEWS_API_DEBUG] Request body:`, JSON.stringify(req.body, null, 2));
+    const { companyName, state = 'Florida' } = req.body;
+    
+    if (!companyName) {
+      console.log(`[GOOGLE_REVIEWS_API_DEBUG] ERROR: Company name is missing from request body`);
+      return res.status(400).json({ 
+        error: 'Company name is required',
+        success: false 
+      });
+    }
+    
+    console.log(`[GOOGLE_REVIEWS_API_DEBUG] Processing request for: "${companyName}" in ${state}`);
+    
+    // Check if Google Places API key is configured
+    if (!process.env.GOOGLE_PLACES_API_KEY) {
+      console.error(`[GOOGLE_REVIEWS_API_DEBUG] ERROR: GOOGLE_PLACES_API_KEY environment variable is not set`);
+      console.log(`[GOOGLE_REVIEWS_API_DEBUG] Available environment variables:`, Object.keys(process.env).filter(key => key.includes('GOOGLE') || key.includes('API')));
+      return res.status(500).json({
+        success: false,
+        error: 'Google Places API key not configured',
+        message: 'Server configuration error: Google Places API key is missing',
+        debug: {
+          hasApiKey: !!process.env.GOOGLE_PLACES_API_KEY,
+          availableEnvVars: Object.keys(process.env).filter(key => key.includes('GOOGLE') || key.includes('API'))
+        }
+      });
+    }
+    
+    console.log(`[GOOGLE_REVIEWS_API_DEBUG] API key is configured, calling fetchGoogleReviews...`);
+    const reviewsData = await fetchGoogleReviews(companyName, state);
+    
+    // Log the result for debugging
+    console.log(`[GOOGLE_REVIEWS_API_DEBUG] Google Reviews result:`, {
+      success: reviewsData.success,
+      business_found: reviewsData.business_found,
+      rating: reviewsData.rating,
+      reviews_count: Array.isArray(reviewsData.reviews) ? reviewsData.reviews.length : (reviewsData.reviews as any).all?.length || 0,
+      place_id: reviewsData.place_id,
+      error: reviewsData.error
+    });
+    
+    console.log(`[GOOGLE_REVIEWS_API_DEBUG] Returning response with status 200`);
+    return res.status(200).json(reviewsData);
+    
+  } catch (error) {
+    console.error(`[GOOGLE_REVIEWS_API_DEBUG] ERROR: Google Reviews API error:`, error);
+    console.error(`[GOOGLE_REVIEWS_API_DEBUG] ERROR: Stack trace:`, (error as Error).stack);
     return res.status(500).json({
       success: false,
-      companyName: companyName || '',
-      message: `Error occurred while scraping: ${error instanceof Error ? error.message : 'Unknown error'}`
+      error: (error as Error).message,
+      message: 'Internal server error while fetching Google Reviews',
     });
   }
 }
+
+// Export the fetch function for use in other modules
+export { fetchGoogleReviews };
