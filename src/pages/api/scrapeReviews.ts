@@ -398,7 +398,7 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
     return {
       success: false,
       error: (error as Error).message,
-      message: "This company doesn't have any reviews available from its customers.",
+      message: "There are no customer reviews available for this company.",
       rating: null,
       reviews: [],
       business_found: false
