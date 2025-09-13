@@ -44,6 +44,11 @@ interface GooglePlaceDetails {
   formatted_address?: string;
   formatted_phone_number?: string;
   website?: string;
+  address_components?: {
+    long_name: string;
+    short_name: string;
+    types: string[];
+  }[];
 }
 
 interface GooglePlaceDetailsResponse {
@@ -110,10 +115,11 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
     console.log(`[GOOGLE_REVIEWS_DEBUG] API key found: ${googleApiKey.substring(0, 10)}...`);
 
     // Step 1: Search for the business using Text Search to get place_id
-    const searchQuery = `${companyName} ${state}`;
-    const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(searchQuery)}&key=${googleApiKey}`;
+    // Use more restrictive search with location bias to Florida
+    const searchQuery = `${companyName}`;
+    const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(searchQuery)}&location=27.6648,-81.5158&radius=500000&region=us&key=${googleApiKey}`;
     
-    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 1: Searching Google Places for place_id`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 1: Searching Google Places for place_id (Florida only)`);
     console.log(`[GOOGLE_REVIEWS_DEBUG] Search query: "${searchQuery}"`);
     console.log(`[GOOGLE_REVIEWS_DEBUG] Search URL: ${searchUrl.replace(googleApiKey, 'API_KEY_HIDDEN')}`);
     
@@ -136,36 +142,89 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
     console.log(`[GOOGLE_REVIEWS_DEBUG] Google Places search response status: ${searchData.status}`);
     console.log(`[GOOGLE_REVIEWS_DEBUG] Search results count: ${searchData.results?.length || 0}`);
     
-    if (searchData.results && searchData.results.length > 0) {
-      console.log(`[GOOGLE_REVIEWS_DEBUG] First result:`, {
-        name: searchData.results[0].name,
-        place_id: searchData.results[0].place_id,
-        rating: searchData.results[0].rating,
-        user_ratings_total: searchData.results[0].user_ratings_total
-      });
-    }
-    
     if (searchData.status !== 'OK' && searchData.status !== 'ZERO_RESULTS') {
       console.error(`[GOOGLE_REVIEWS_DEBUG] ERROR: Google Places API error: ${searchData.status} - ${searchData.error_message || 'Unknown error'}`);
       throw new Error(`Google Places API error: ${searchData.status} - ${searchData.error_message || 'Unknown error'}`);
     }
     
     if (!searchData.results || searchData.results.length === 0) {
-      console.log(`[GOOGLE_REVIEWS_DEBUG] No results found for "${companyName}" in ${state}`);
+      console.log(`[GOOGLE_REVIEWS_DEBUG] No results found for "${companyName}" in Florida`);
       return {
         success: false,
-        message: `No Google business listing found for "${companyName}" in ${state}`,
+        message: "This company doesn't have any reviews available from its customers.",
         rating: null,
         reviews: [],
         business_found: false
       };
     }
 
-    // Step 2: Get the first result (most relevant) and extract place_id
-    const business = searchData.results[0];
+    // Log all results for debugging
+    console.log(`[GOOGLE_REVIEWS_DEBUG] All search results:`);
+    searchData.results.forEach((result, index) => {
+      console.log(`[GOOGLE_REVIEWS_DEBUG] Result ${index + 1}:`, {
+        name: result.name,
+        place_id: result.place_id,
+        rating: result.rating,
+        user_ratings_total: result.user_ratings_total,
+        vicinity: result.vicinity,
+        types: result.types
+      });
+    });
+
+    // Step 2: Find exact match for company name and verify it's in Florida
+    const normalizeCompanyName = (name: string): string => {
+      return name
+        .toLowerCase()
+        .replace(/[.,\-_'"]/g, '') // Remove common punctuation
+        .replace(/\s+/g, ' ') // Normalize spaces
+        .trim();
+    };
+
+    const normalizedSearchName = normalizeCompanyName(companyName);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Normalized search name: "${normalizedSearchName}"`);
+
+    let matchedBusiness: GooglePlaceSearchResult | null = null;
+
+    // Look for exact match first
+    for (const result of searchData.results) {
+      const normalizedResultName = normalizeCompanyName(result.name);
+      console.log(`[GOOGLE_REVIEWS_DEBUG] Comparing "${normalizedSearchName}" with "${normalizedResultName}"`);
+      
+      if (normalizedResultName === normalizedSearchName) {
+        console.log(`[GOOGLE_REVIEWS_DEBUG] Found exact match: ${result.name}`);
+        matchedBusiness = result;
+        break;
+      }
+    }
+
+    // If no exact match, check if any result contains the search term
+    if (!matchedBusiness) {
+      for (const result of searchData.results) {
+        const normalizedResultName = normalizeCompanyName(result.name);
+        
+        if (normalizedResultName.includes(normalizedSearchName) || normalizedSearchName.includes(normalizedResultName)) {
+          console.log(`[GOOGLE_REVIEWS_DEBUG] Found partial match: ${result.name}`);
+          matchedBusiness = result;
+          break;
+        }
+      }
+    }
+
+    if (!matchedBusiness) {
+      console.log(`[GOOGLE_REVIEWS_DEBUG] No matching company found for "${companyName}"`);
+      return {
+        success: false,
+        message: "This company doesn't have any reviews available from its customers.",
+        rating: null,
+        reviews: [],
+        business_found: false
+      };
+    }
+
+    const business = matchedBusiness;
     const placeId = business.place_id;
     
-    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 2: Found business: ${business.name} (Place ID: ${placeId})`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 2: Found matching business: ${business.name} (Place ID: ${placeId})`);
     console.log(`[GOOGLE_REVIEWS_DEBUG] Business details:`, {
       name: business.name,
       rating: business.rating,
@@ -174,10 +233,10 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
       types: business.types
     });
     
-    // Step 3: Use place_id to fetch detailed reviews using REST API
-    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,rating,user_ratings_total,reviews,formatted_address,formatted_phone_number,website&key=${googleApiKey}`;
+    // Step 3: Use place_id to fetch detailed information to verify Florida location
+    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,rating,user_ratings_total,reviews,formatted_address,formatted_phone_number,website,address_components&key=${googleApiKey}`;
     
-    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 3: Fetching reviews for place_id: ${placeId}`);
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Step 3: Fetching detailed info for place_id: ${placeId}`);
     console.log(`[GOOGLE_REVIEWS_DEBUG] Details URL: ${detailsUrl.replace(googleApiKey, 'API_KEY_HIDDEN')}`);
     
     const detailsResponse = await fetch(detailsUrl, {
@@ -204,6 +263,26 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
     }
     
     const placeDetails = detailsData.result;
+    
+    // Verify the business is actually in Florida
+    const address = placeDetails.formatted_address || '';
+    const isInFlorida = address.toLowerCase().includes('fl') || address.toLowerCase().includes('florida');
+    
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Address verification:`, {
+      formatted_address: address,
+      is_in_florida: isInFlorida
+    });
+
+    if (!isInFlorida) {
+      console.log(`[GOOGLE_REVIEWS_DEBUG] Business "${placeDetails.name}" is not located in Florida`);
+      return {
+        success: false,
+        message: "This company doesn't have any reviews available from its customers.",
+        rating: null,
+        reviews: [],
+        business_found: false
+      };
+    }
     
     // Step 4: Process reviews data
     const reviews = placeDetails.reviews || [];
@@ -235,8 +314,8 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
     if (reviews.length === 0) {
       console.log(`[GOOGLE_REVIEWS_DEBUG] No reviews found for business: ${placeDetails.name}`);
       return {
-        success: true,
-        message: `Business "${placeDetails.name}" found but has no customer reviews available`,
+        success: false,
+        message: "This company doesn't have any reviews available from its customers.",
         rating: rating,
         total_ratings: totalRatings,
         reviews: [],
@@ -319,7 +398,7 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
     return {
       success: false,
       error: (error as Error).message,
-      message: `Failed to retrieve Google Reviews for "${companyName}": ${(error as Error).message}`,
+      message: "This company doesn't have any reviews available from its customers.",
       rating: null,
       reviews: [],
       business_found: false
