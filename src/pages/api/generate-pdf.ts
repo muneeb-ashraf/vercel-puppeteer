@@ -53,8 +53,8 @@ export default async function handler(
     // Wait for fonts to load (important for styling)
     await page.evaluateHandle('document.fonts.ready');
 
-    // Additional wait for any dynamic content
-    await page.waitForTimeout(1000);
+    // Additional wait for any dynamic content using standard Promise
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Enhanced PDF generation options
     const pdfBuffer = await page.pdf({ 
