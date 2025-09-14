@@ -18,23 +18,57 @@ export default async function handler(
       return res.status(400).json({ error: "Missing HTML content" });
     }
 
-    // Launch Puppeteer with Chromium for serverless
-  const browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(),
-    headless: true, // always safe for serverless
-  });
+    // Enhanced Chromium args for better CSS/font support
+    const args = [
+      ...chromium.args,
+      '--disable-web-security',
+      '--disable-features=VizDisplayCompositor',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu',
+      '--font-render-hinting=none',
+    ];
+
+    const browser = await puppeteer.launch({
+      args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    });
 
     const page = await browser.newPage();
 
-    // Set viewport if you need custom sizing
+    // Set viewport for consistent rendering
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // Load HTML directly
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    // Enhanced content loading with better wait conditions
+    await page.setContent(html, { 
+      waitUntil: ["networkidle0", "domcontentloaded"],
+      timeout: 30000 
+    });
 
-    // Generate PDF
-    const pdfBuffer = await page.pdf({ format: "A4" });
+    // Wait for fonts to load (important for styling)
+    await page.evaluateHandle('document.fonts.ready');
+
+    // Additional wait for any dynamic content
+    await page.waitForTimeout(1000);
+
+    // Enhanced PDF generation options
+    const pdfBuffer = await page.pdf({ 
+      format: "A4",
+      printBackground: true, // Critical: ensures CSS backgrounds and colors are printed
+      margin: {
+        top: '15mm',
+        right: '15mm',
+        bottom: '15mm',
+        left: '15mm'
+      },
+      preferCSSPageSize: true, // Respects CSS @page rules
+    });
+
     await browser.close();
 
     // Supabase client
