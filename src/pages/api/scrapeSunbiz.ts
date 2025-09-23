@@ -100,7 +100,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (!result) {
       await browser.close();
-      return res.status(404).json({ error: 'Company not found.' });
+      return res.status(404).json({ error: 'Company not found in first 5 search results.' });
     }
 
     if ((result as any).reviewNeeded) {
@@ -108,10 +108,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ review: (result as any).reviewNeeded.join(', ') });
     }
 
-    const responseData = await scrapeCompanyDetails(page, result as string);
+    // Fetch raw HTML instead of scraping details
+    const htmlContent = await fetchCompanyPageHTML(page, result as string);
     
     await browser.close();
-    return res.status(200).json({ data: responseData });
+    return res.status(200).json({ 
+      url: result,
+      html: htmlContent 
+    });
 
   } catch (err) {
     if (browser) await browser.close();
