@@ -8,10 +8,10 @@ export default async function handler(
   res: NextApiResponse
 ) {
   if (req.method !== "POST") {
+    res.setHeader("Allow", ["POST"]);
     return res.status(405).json({ error: "Method not allowed, use POST" });
   }
 
-  let browser = null;
   try {
     const { html } = req.body as { html?: string };
 
@@ -19,87 +19,80 @@ export default async function handler(
       return res.status(400).json({ error: "Missing HTML content" });
     }
 
-    browser = await puppeteer.launch({
+    // Use a minimal set of proven args for serverless environments
+    const browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
       executablePath: await chromium.executablePath(),
-      headless: "shell", // Use modern headless mode
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
 
-    // --- KEY FIXES FOR PDF LAYOUT ---
-
-    // 1. Emulate a print media type. This is the most crucial step.
-    // It makes the browser render the page as if it's being printed,
-    // which aligns the layout engine with the final PDF output.
-    await page.emulateMediaType('print');
-
-    // 2. Set the content. The viewport emulation is removed because it's for screen media
-    // and can cause conflicts with print media rendering, leading to extra pages.
-    await page.setContent(html, {
-      waitUntil: "networkidle0", // Wait for all network activity to cease (images, fonts, etc.)
-      timeout: 30000,
+    // 1. Set content using a data URI with page.goto for more reliable loading
+    // This is often more robust than page.setContent for complex HTML.
+    await page.goto(`data:text/html;charset=UTF-8,${encodeURIComponent(html)}`, {
+      waitUntil: "networkidle0",
     });
 
-    // It's good practice to wait for fonts to be fully loaded before generating the PDF
-    await page.evaluateHandle('document.fonts.ready');
-    
-    // --- END OF KEY FIXES ---
+    // 2. CRITICAL FIX: Emulate the 'print' media type.
+    // This forces the browser to apply @page CSS rules and render the layout
+    // as it will be printed, eliminating the blank first page issue.
+    await page.emulateMediaType("print");
 
+    // 3. Generate PDF. The `preferCSSPageSize: true` will respect the @page
+    // rule in your CSS, and `emulateMediaType` ensures it's applied correctly.
     const pdfBuffer = await page.pdf({
       format: "A4",
-      printBackground: true, // Essential for rendering CSS background colors and images
+      printBackground: true,
       margin: {
-        top: '15mm',
-        right: '15mm',
-        bottom: '15mm',
-        left: '15mm',
+        top: "15mm",
+        right: "15mm",
+        bottom: "15mm",
+        left: "15mm",
       },
-      // This respects any @page rules you have in your CSS, which is great for print.
-      preferCSSPageSize: true, 
+      preferCSSPageSize: true,
     });
 
     await browser.close();
-    browser = null; // Ensure browser is marked as closed
 
-    // --- SECURITY & BEST PRACTICE IMPROVEMENT ---
-    // Use secure, server-side environment variables for backend operations.
-    // VITE_ or NEXT_PUBLIC_ variables are exposed to the client-side.
+    // Supabase client - unchanged as requested
     const supabase = createClient(
       process.env.VITE_SUPABASE_URL as string,
       process.env.VITE_SUPABASE_PUBLISHABLE_KEY as string
     );
 
+    // Unique filename
     const fileName = `report-${Date.now()}.pdf`;
 
-    const { error: uploadError } = await supabase.storage
+    // Upload PDF
+    const { data, error: uploadError } = await supabase.storage
       .from("pdf-reports")
       .upload(fileName, pdfBuffer, {
         contentType: "application/pdf",
-        upsert: false, // Prevent overwriting files
+        cacheControl: '3600',
+        upsert: false,
       });
 
     if (uploadError) {
-      console.error("Supabase upload error:", uploadError);
+      console.error("Supabase Upload Error:", uploadError.message);
       return res.status(500).json({ error: "Failed to upload PDF", details: uploadError.message });
     }
 
+    // Get public URL
     const { data: publicUrlData } = supabase.storage
       .from("pdf-reports")
       .getPublicUrl(fileName);
 
     if (!publicUrlData?.publicUrl) {
-      return res.status(500).json({ error: "Could not retrieve public URL for the PDF" });
+      return res.status(500).json({ error: "Could not retrieve public URL" });
     }
 
     return res.status(200).json({ url: publicUrlData.publicUrl });
   } catch (err) {
-    if (browser) {
-      await browser.close();
-    }
-    console.error("PDF generation error:", err);
-    const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-    return res.status(500).json({ error: "Internal server error", details: errorMessage });
+    console.error("PDF Generation Error:", err);
+    const error = err instanceof Error ? err.message : "An unknown error occurred.";
+    return res.status(500).json({ error: "Internal server error", details: error });
   }
 }
