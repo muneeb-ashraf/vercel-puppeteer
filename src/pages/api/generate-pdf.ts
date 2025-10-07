@@ -22,28 +22,24 @@ export default async function handler(
     // Use a minimal set of proven args for serverless environments
     const browser = await puppeteer.launch({
       args: chromium.args,
-      // The 'defaultViewport' property was removed as it does not exist on the chromium object.
-      // It is also not needed when emulating a print media type.
       executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+      // FIX: The 'headless' property on the chromium object does not exist.
+      // Set to "new" for modern headless mode, which is recommended.
+      headless: "new",
       ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
 
     // 1. Set content using a data URI with page.goto for more reliable loading
-    // This is often more robust than page.setContent for complex HTML.
     await page.goto(`data:text/html;charset=UTF-8,${encodeURIComponent(html)}`, {
       waitUntil: "networkidle0",
     });
 
     // 2. CRITICAL FIX: Emulate the 'print' media type.
-    // This forces the browser to apply @page CSS rules and render the layout
-    // as it will be printed, eliminating the blank first page issue.
     await page.emulateMediaType("print");
 
-    // 3. Generate PDF. The `preferCSSPageSize: true` will respect the @page
-    // rule in your CSS, and `emulateMediaType` ensures it's applied correctly.
+    // 3. Generate PDF.
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
