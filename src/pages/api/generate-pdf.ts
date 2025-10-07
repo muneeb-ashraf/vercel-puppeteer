@@ -40,7 +40,7 @@ export default async function handler(
     const pdfBuffer = await page.pdf({
       // Use width and height for A4 directly to be explicit with the renderer.
       width: '210mm',
-      height: '297mm',
+      height: '370mm',
       printBackground: true,
       // The margin is already in your @page CSS, but setting it here ensures it's enforced.
       margin: {
@@ -93,3 +93,4 @@ export default async function handler(
     return res.status(500).json({ error: "Internal server error", details: error });
   }
 }
+
