@@ -11,6 +11,7 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed, use POST" });
   }
 
+  let browser = null;
   try {
     const { html } = req.body as { html?: string };
 
@@ -18,92 +19,87 @@ export default async function handler(
       return res.status(400).json({ error: "Missing HTML content" });
     }
 
-    // Enhanced Chromium args for better CSS/font support
-    const args = [
-      ...chromium.args,
-      '--disable-web-security',
-      '--disable-features=VizDisplayCompositor',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--disable-gpu',
-      '--font-render-hinting=none',
-    ];
-
-    const browser = await puppeteer.launch({
-      args,
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
       executablePath: await chromium.executablePath(),
-      headless: true,
+      headless: "shell", // Use modern headless mode
     });
 
     const page = await browser.newPage();
 
-    // Set viewport for consistent rendering
-    await page.setViewport({ width: 1920, height: 1080 });
+    // --- KEY FIXES FOR PDF LAYOUT ---
 
-    // Enhanced content loading with better wait conditions
-    await page.setContent(html, { 
-      waitUntil: ["networkidle0", "domcontentloaded"],
-      timeout: 30000 
+    // 1. Emulate a print media type. This is the most crucial step.
+    // It makes the browser render the page as if it's being printed,
+    // which aligns the layout engine with the final PDF output.
+    await page.emulateMediaType('print');
+
+    // 2. Set the content. The viewport emulation is removed because it's for screen media
+    // and can cause conflicts with print media rendering, leading to extra pages.
+    await page.setContent(html, {
+      waitUntil: "networkidle0", // Wait for all network activity to cease (images, fonts, etc.)
+      timeout: 30000,
     });
 
-    // Wait for fonts to load (important for styling)
+    // It's good practice to wait for fonts to be fully loaded before generating the PDF
     await page.evaluateHandle('document.fonts.ready');
+    
+    // --- END OF KEY FIXES ---
 
-    // Additional wait for any dynamic content using standard Promise
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Enhanced PDF generation options
-    const pdfBuffer = await page.pdf({ 
+    const pdfBuffer = await page.pdf({
       format: "A4",
-      printBackground: true, // Critical: ensures CSS backgrounds and colors are printed
+      printBackground: true, // Essential for rendering CSS background colors and images
       margin: {
         top: '15mm',
         right: '15mm',
         bottom: '15mm',
-        left: '15mm'
+        left: '15mm',
       },
-      preferCSSPageSize: true, // Respects CSS @page rules
+      // This respects any @page rules you have in your CSS, which is great for print.
+      preferCSSPageSize: true, 
     });
 
     await browser.close();
+    browser = null; // Ensure browser is marked as closed
 
-    // Supabase client
+    // --- SECURITY & BEST PRACTICE IMPROVEMENT ---
+    // Use secure, server-side environment variables for backend operations.
+    // VITE_ or NEXT_PUBLIC_ variables are exposed to the client-side.
     const supabase = createClient(
       process.env.VITE_SUPABASE_URL as string,
       process.env.VITE_SUPABASE_PUBLISHABLE_KEY as string
     );
 
-    // Unique filename
     const fileName = `report-${Date.now()}.pdf`;
 
-    // Upload PDF
     const { error: uploadError } = await supabase.storage
       .from("pdf-reports")
       .upload(fileName, pdfBuffer, {
         contentType: "application/pdf",
+        upsert: false, // Prevent overwriting files
       });
 
     if (uploadError) {
-      console.error(uploadError);
-      return res.status(500).json({ error: "Failed to upload PDF" });
+      console.error("Supabase upload error:", uploadError);
+      return res.status(500).json({ error: "Failed to upload PDF", details: uploadError.message });
     }
 
-    // Get public URL
     const { data: publicUrlData } = supabase.storage
       .from("pdf-reports")
       .getPublicUrl(fileName);
 
     if (!publicUrlData?.publicUrl) {
-      return res.status(500).json({ error: "Could not retrieve public URL" });
+      return res.status(500).json({ error: "Could not retrieve public URL for the PDF" });
     }
 
     return res.status(200).json({ url: publicUrlData.publicUrl });
   } catch (err) {
+    if (browser) {
+      await browser.close();
+    }
     console.error("PDF generation error:", err);
-    return res.status(500).json({ error: "Internal server error" });
+    const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+    return res.status(500).json({ error: "Internal server error", details: errorMessage });
   }
 }
