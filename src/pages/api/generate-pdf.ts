@@ -22,7 +22,8 @@ export default async function handler(
     // Use a minimal set of proven args for serverless environments
     const browser = await puppeteer.launch({
       args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
+      // The 'defaultViewport' property was removed as it does not exist on the chromium object.
+      // It is also not needed when emulating a print media type.
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
