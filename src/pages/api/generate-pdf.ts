@@ -23,30 +23,36 @@ export default async function handler(
       args: chromium.args,
       executablePath: await chromium.executablePath(),
       headless: true,
-      // FIX: 'ignoreHTTPSErrors' is not a valid launch option. It has been removed.
     });
 
     const page = await browser.newPage();
 
-    // 1. Set content using a data URI with page.goto for more reliable loading
     await page.goto(`data:text/html;charset=UTF-8,${encodeURIComponent(html)}`, {
       waitUntil: "networkidle0",
     });
 
-    // 2. CRITICAL FIX: Emulate the 'print' media type.
+    // Ensure all fonts are loaded before emulating print media
+    await page.evaluateHandle('document.fonts.ready');
+
     await page.emulateMediaType("print");
 
-    // 3. Generate PDF.
+    // This is the final and most robust set of PDF options.
     const pdfBuffer = await page.pdf({
-      format: "A4",
+      // Use width and height for A4 directly to be explicit with the renderer.
+      width: '210mm',
+      height: '297mm',
       printBackground: true,
+      // The margin is already in your @page CSS, but setting it here ensures it's enforced.
       margin: {
         top: "15mm",
         right: "15mm",
         bottom: "15mm",
         left: "15mm",
       },
-      preferCSSPageSize: true,
+      // This is important: ensures no default browser headers/footers add extra space.
+      displayHeaderFooter: false,
+      // This ensures the @page rule from your CSS is the primary source of truth for sizing.
+      preferCSSPageSize: true, 
     });
 
     await browser.close();
@@ -57,10 +63,8 @@ export default async function handler(
       process.env.VITE_SUPABASE_PUBLISHABLE_KEY as string
     );
 
-    // Unique filename
     const fileName = `report-${Date.now()}.pdf`;
 
-    // Upload PDF
     const { data, error: uploadError } = await supabase.storage
       .from("pdf-reports")
       .upload(fileName, pdfBuffer, {
@@ -74,7 +78,6 @@ export default async function handler(
       return res.status(500).json({ error: "Failed to upload PDF", details: uploadError.message });
     }
 
-    // Get public URL
     const { data: publicUrlData } = supabase.storage
       .from("pdf-reports")
       .getPublicUrl(fileName);
