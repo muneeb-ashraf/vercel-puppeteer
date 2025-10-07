@@ -20,41 +20,61 @@ async function searchByCompanyName(page: Page, companyName: string) {
   await page.click('input[type="submit"][value="Search Now"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  // Get the first 5 anchor tags with company names
-  const links = await page.$$eval('a', (anchors: HTMLAnchorElement[]) =>
-    anchors
-      .map(a => ({ text: a.textContent?.trim() || '', href: a.href }))
-      .filter(link => link.text && link.href.includes('/Inquiry/CorporationSearch/SearchResultDetail')) // Filter only relevant company links
-      .slice(0, 5) // Take only first 5 results
-  );
+  // Get details from the first 5 result rows, including the document number
+  const resultsFromPage = await page.$$eval('#search-results tbody tr', (rows: HTMLTableRowElement[]) => {
+    const results = [];
+    // Process up to the first 5 rows found on the page
+    for (const row of rows.slice(0, 5)) {
+      const nameCell = row.querySelector('td:first-child');
+      const docNumCell = row.querySelector('td:nth-child(2)');
+      
+      const link = nameCell?.querySelector('a');
+      const text = link?.textContent?.trim() || '';
+      const href = link?.href || '';
+      const documentNumber = docNumCell?.textContent?.trim() || '';
+      
+      if (text && href && documentNumber) {
+        results.push({ text, href, documentNumber });
+      }
+    }
+    return results;
+  });
+
+  // --- MODIFICATION START ---
+  // Filter out results where the document number starts with 'F' or 'M'
+  const filteredResults = resultsFromPage.filter(result => {
+    const docNum = result.documentNumber.toUpperCase();
+    return !docNum.startsWith('F') && !docNum.startsWith('M');
+  });
+  // --- MODIFICATION END ---
 
   const normalizedSearchName = normalizeCompanyName(companyName);
 
-  // Check first 5 results for exact matches
-  for (const link of links) {
-    const normalizedLinkText = normalizeCompanyName(link.text);
+  // Check the filtered results for an exact match
+  for (const result of filteredResults) {
+    const normalizedResultText = normalizeCompanyName(result.text);
     
-    // Check if it's an exact match or exact match with comma variations
-    if (normalizedLinkText === normalizedSearchName ||
-        normalizedLinkText === normalizedSearchName.replace(',', '') ||
-        normalizedLinkText.replace(',', '') === normalizedSearchName) {
-      return link.href;
+    // Check for an exact match or an exact match with comma variations
+    if (normalizedResultText === normalizedSearchName ||
+        normalizedResultText === normalizedSearchName.replace(',', '') ||
+        normalizedResultText.replace(',', '') === normalizedSearchName) {
+      return result.href; // Return the href of the first exact match found
     }
   }
 
-  // If no exact match found in first 5, look for close matches
-  const closeMatches = links.filter(link => {
-    const normalizedLinkText = normalizeCompanyName(link.text);
-    return normalizedLinkText.includes(normalizedSearchName) ||
-           normalizedSearchName.includes(normalizedLinkText);
+  // If no exact match is found, look for close matches within the filtered list
+  const closeMatches = filteredResults.filter(result => {
+    const normalizedResultText = normalizeCompanyName(result.text);
+    return normalizedResultText.includes(normalizedSearchName) ||
+           normalizedSearchName.includes(normalizedResultText);
   });
 
-  // If close matches found, return them for review
+  // If close matches are found, return their names for manual review
   if (closeMatches.length > 0) {
     return { reviewNeeded: closeMatches.map(l => l.text) };
   }
 
-  return null;
+  return null; // No suitable match found
 }
 
 
@@ -100,7 +120,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (!result) {
       await browser.close();
-      return res.status(404).json({ error: 'Company not found in first 5 search results.' });
+      return res.status(404).json({ error: 'Company not found or all matches were filtered out.' });
     }
 
     if ((result as any).reviewNeeded) {
