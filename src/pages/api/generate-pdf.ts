@@ -23,9 +23,9 @@ export default async function handler(
     const browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath(),
-      // FIX: The 'headless' property on the chromium object does not exist.
-      // Set to "new" for modern headless mode, which is recommended.
-      headless: "new",
+      // FIX: The installed puppeteer version does not support "new".
+      // Using `true` enables the classic headless mode and resolves the type error.
+      headless: true,
       ignoreHTTPSErrors: true,
     });
 
