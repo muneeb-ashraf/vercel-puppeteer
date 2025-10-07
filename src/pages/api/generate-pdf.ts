@@ -19,14 +19,11 @@ export default async function handler(
       return res.status(400).json({ error: "Missing HTML content" });
     }
 
-    // Use a minimal set of proven args for serverless environments
     const browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath(),
-      // FIX: The installed puppeteer version does not support "new".
-      // Using `true` enables the classic headless mode and resolves the type error.
       headless: true,
-      ignoreHTTPSErrors: true,
+      // FIX: 'ignoreHTTPSErrors' is not a valid launch option. It has been removed.
     });
 
     const page = await browser.newPage();
