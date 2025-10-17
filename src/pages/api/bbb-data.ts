@@ -1,5 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { JSDOM } from 'jsdom';
+import chromium from '@sparticuz/chromium';
+import puppeteer from 'puppeteer-core';
 
 // --- A list of common browser User-Agent strings ---
 const USER_AGENTS = [
@@ -10,7 +12,6 @@ const USER_AGENTS = [
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
 ];
 
-
 // --- Main Next.js API Request Handler ---
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // --- CORS Headers ---
@@ -18,18 +19,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  // Handle preflight OPTIONS requests for CORS
   if (req.method === "OPTIONS") {
     res.status(200).end();
     return;
   }
 
-  // Ensure the request method is POST
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     res.status(405).json({ message: "Method Not Allowed" });
     return;
   }
+
+  let browser = null;
 
   try {
     const { companyName, city, state } = req.body;
@@ -43,28 +44,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const findLoc = encodeURIComponent(`${city}, ${state}`);
     const bbbUrl = `https://www.bbb.org/search?find_text=${findText}&find_loc=${findLoc}&find_country=USA`;
 
-    // --- Select a random User-Agent ---
-    const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-
-    // --- 3. Fetch the HTML from BBB Website with more robust headers ---
-    const response = await fetch(bbbUrl, {
-      headers: {
-        "User-Agent": randomUserAgent,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.google.com/", // A common referer
-        "DNT": "1", // Do Not Track
-        "Upgrade-Insecure-Requests": "1"
-      }
+    // --- 1. Launch a headless browser instance ---
+    // This configuration is optimized for serverless environments like Vercel
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
 
-    if (!response.ok) {
-      // Provide more context in the error for easier debugging
-      throw new Error(`Failed to fetch from BBB: ${response.status} ${response.statusText}. URL: ${bbbUrl}`);
-    }
+    const page = await browser.newPage();
+    
+    // --- 2. Set a random User-Agent to mimic a real browser ---
+    const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+    await page.setUserAgent(randomUserAgent);
 
-    const html = await response.text();
+    // --- 3. Navigate to the page and get HTML content ---
+    await page.goto(bbbUrl, { waitUntil: 'domcontentloaded' });
+    const html = await page.content();
 
+    // --- 4. Parse HTML and find the company ---
     const dom = new JSDOM(html);
     const doc = dom.window.document;
     
@@ -100,6 +100,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (error: any) {
     console.error("An error occurred:", error);
     res.status(500).json({ message: "Internal Server Error", error: error.message });
+  } finally {
+    // --- 5. Ensure the browser is closed ---
+    if (browser !== null) {
+      await browser.close();
+    }
   }
 }
 
