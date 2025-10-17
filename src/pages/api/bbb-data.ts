@@ -59,7 +59,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const resultCards = doc.querySelectorAll(".result-card");
     let foundCompanyData = null;
 
-    for (const card of resultCards) {
+    // Using a traditional 'for' loop for broader compatibility with older JS targets.
+    for (let i = 0; i < resultCards.length; i++) {
+      const card = resultCards[i];
       const nameElement = card.querySelector(".result-business-name a");
       
       // Clean the company name by removing HTML tags (like <em>) and extra whitespace
