@@ -76,7 +76,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         foundCompanyData = {
           company: cardCompanyName,
-          bbbRating: ratingElement ? ratingElement.textContent.trim() : "Not found",
+          bbbRating: ratingElement?.textContent?.trim() || "Not found",
           accreditationStatus: accreditationImg ? (accreditationImg as HTMLImageElement).alt.trim() : "Not found",
         };
         break; // Stop searching once the exact match is found
@@ -95,4 +95,5 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 }
+
 
