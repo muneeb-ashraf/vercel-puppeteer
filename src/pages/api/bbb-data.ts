@@ -49,7 +49,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+      headless: 'new', // Use the new headless mode
       ignoreHTTPSErrors: true,
     });
 
@@ -106,5 +106,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 }
+
 
 
