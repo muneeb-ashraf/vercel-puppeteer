@@ -50,7 +50,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       args: chromium.args,
       executablePath: await chromium.executablePath(),
       headless: true, // Use the boolean value for wider compatibility
-      ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
