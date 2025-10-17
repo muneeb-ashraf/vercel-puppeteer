@@ -1,37 +1,36 @@
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { JSDOM } from 'jsdom';
 
-// --- Main HTTP Request Handler ---
-async function handler(req: Request): Promise<Response> {
-  // Set CORS headers to allow requests from any origin
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
+// --- Main Next.js API Request Handler ---
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // --- CORS Headers ---
+  // Set CORS headers to allow requests from any origin.
+  // In a production app, you might want to restrict this to your frontend's domain.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   // Handle preflight OPTIONS requests for CORS
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    res.status(200).end();
+    return;
   }
 
   // Ensure the request method is POST
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ message: "Method Not Allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    res.setHeader("Allow", ["POST"]);
+    res.status(405).json({ message: "Method Not Allowed" });
+    return;
   }
 
   try {
     // --- 1. Parse Incoming JSON Data ---
-    const { companyName, city, state } = await req.json();
+    // In Next.js, the body is already parsed on `req.body`
+    const { companyName, city, state } = req.body;
 
     if (!companyName || !city || !state) {
-      return new Response(JSON.stringify({ message: "Missing required fields: companyName, city, state" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      res.status(400).json({ message: "Missing required fields: companyName, city, state" });
+      return;
     }
 
     // --- 2. Construct the BBB Search URL ---
@@ -53,11 +52,9 @@ async function handler(req: Request): Promise<Response> {
 
     const html = await response.text();
 
-    // --- 4. Parse HTML and Find the Company ---
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    if (!doc) {
-      throw new Error("Failed to parse the HTML document.");
-    }
+    // --- 4. Parse HTML with jsdom and Find the Company ---
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
     
     const resultCards = doc.querySelectorAll(".result-card");
     let foundCompanyData = null;
@@ -66,7 +63,7 @@ async function handler(req: Request): Promise<Response> {
       const nameElement = card.querySelector(".result-business-name a");
       
       // Clean the company name by removing HTML tags (like <em>) and extra whitespace
-      const cardCompanyName = nameElement?.textContent.trim().replace(/\s+/g, ' ');
+      const cardCompanyName = nameElement?.textContent?.trim().replace(/\s+/g, ' ');
 
       // Case-insensitive comparison
       if (cardCompanyName?.toLowerCase() === companyName.toLowerCase()) {
@@ -78,7 +75,7 @@ async function handler(req: Request): Promise<Response> {
         foundCompanyData = {
           company: cardCompanyName,
           bbbRating: ratingElement ? ratingElement.textContent.trim() : "Not found",
-          accreditationStatus: accreditationImg ? accreditationImg.getAttribute("alt")?.trim() : "Not found",
+          accreditationStatus: accreditationImg ? (accreditationImg as HTMLImageElement).alt.trim() : "Not found",
         };
         break; // Stop searching once the exact match is found
       }
@@ -86,26 +83,14 @@ async function handler(req: Request): Promise<Response> {
 
     // --- 6. Construct and Send the Final JSON Response ---
     if (foundCompanyData) {
-      return new Response(JSON.stringify(foundCompanyData), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      res.status(200).json(foundCompanyData);
     } else {
-      return new Response(JSON.stringify({ message: `No exact BBB record found for "${companyName}".` }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      res.status(404).json({ message: `No exact BBB record found for "${companyName}".` });
     }
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("An error occurred:", error);
-    return new Response(JSON.stringify({ message: "Internal Server Error", error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 }
 
-// --- Start the Deno Server ---
-console.log("BBB Scraper API running on http://localhost:8000");
-serve(handler, { port: 8000 });
