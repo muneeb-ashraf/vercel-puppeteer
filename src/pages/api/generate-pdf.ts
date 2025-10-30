@@ -75,7 +75,7 @@ export default async function handler(
 
     // Set viewport to match content height
     await page.setViewport({
-      width: 1200,
+      width: 317.5mm,
       height: contentHeight,
       deviceScaleFactor: 2, // Higher quality
     });
@@ -139,3 +139,4 @@ export default async function handler(
     });
   }
 }
+
