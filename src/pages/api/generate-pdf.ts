@@ -73,17 +73,17 @@ export default async function handler(
       return document.documentElement.scrollHeight;
     });
 
-    // Set viewport to match content height
+    // Set viewport to match content - convert 317.5mm to pixels (317.5mm ≈ 1200px at 96dpi)
+    const viewportWidth = Math.ceil(317.5 / 0.264583); // Convert mm to pixels
     await page.setViewport({
-      width: 317.5mm,
+      width: viewportWidth,
       height: contentHeight,
       deviceScaleFactor: 2, // Higher quality
     });
 
-    // Use screenshot instead of PDF for true single-page output
-    // Or use PDF with calculated height
+    // Use PDF with calculated height and 317.5mm width
     const pdfBuffer = await page.pdf({
-      width: '210mm', // A4 width
+      width: '317.5mm',
       height: `${Math.ceil(contentHeight * 0.264583)}mm`, // Convert pixels to mm (1px ≈ 0.264583mm)
       printBackground: true,
       margin: {
@@ -139,4 +139,3 @@ export default async function handler(
     });
   }
 }
-
