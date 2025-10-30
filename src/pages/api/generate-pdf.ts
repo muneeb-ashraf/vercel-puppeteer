@@ -18,6 +18,10 @@ export default async function handler(
     if (!html) {
       return res.status(400).json({ error: "Missing HTML content" });
     }
+    
+    // NEW: Remove the @page CSS rule. 
+    // This rule conflicts with rendering a single, full-height page.
+    const modifiedHtml = html.replace(/@page\s*{[^}]*}/g, '');
 
     const browser = await puppeteer.launch({
       args: chromium.args,
@@ -27,37 +31,30 @@ export default async function handler(
 
     const page = await browser.newPage();
 
-    await page.goto(`data:text/html;charset=UTF-8,${encodeURIComponent(html)}`, {
+    // Use the modified HTML that has no @page rule
+    await page.goto(`data:text/html;charset=UTF-8,${encodeURIComponent(modifiedHtml)}`, {
       waitUntil: "networkidle0",
     });
 
-    // Ensure all fonts are loaded before emulating print media
+    // Ensure all fonts are loaded
     await page.evaluateHandle('document.fonts.ready');
 
-    await page.emulateMediaType("print");
+    // REMOVED: await page.emulateMediaType("print");
+    // This was the main cause of the pagination problem.
 
-    // This is the final and most robust set of PDF options.
+    // REVISED: These options create a single PDF as long as the content.
     const pdfBuffer = await page.pdf({
-      // Use width and height for A4 directly to be explicit with the renderer.
-      width: '320mm',
-      height: '300mm',
+      // This is the fixed width you defined in your CSS.
+      width: '317.5mm', 
+      // By OMITTING 'height', Puppeteer renders the full page height.
       printBackground: true,
-      // The margin is already in your @page CSS, but setting it here ensures it's enforced.
-      margin: {
-        top: "15mm",
-        right: "15mm",
-        bottom: "15mm",
-        left: "15mm",
-      },
-      // This is important: ensures no default browser headers/footers add extra space.
-      displayHeaderFooter: false,
-      // This ensures the @page rule from your CSS is the primary source of truth for sizing.
-      preferCSSPageSize: true, 
+      // All other print-specific options (margin, displayHeaderFooter, preferCSSPageSize)
+      // are removed as they are no longer relevant.
     });
 
     await browser.close();
 
-    // Supabase client - unchanged as requested
+    // Supabase client - unchanged
     const supabase = createClient(
       process.env.VITE_SUPABASE_URL as string,
       process.env.VITE_SUPABASE_PUBLISHABLE_KEY as string
@@ -93,7 +90,3 @@ export default async function handler(
     return res.status(500).json({ error: "Internal server error", details: error });
   }
 }
-
-
-
-
