@@ -18,10 +18,6 @@ export default async function handler(
     if (!html) {
       return res.status(400).json({ error: "Missing HTML content" });
     }
-    
-    // NEW: Remove the @page CSS rule. 
-    // This rule conflicts with rendering a single, full-height page.
-    const modifiedHtml = html.replace(/@page\s*{[^}]*}/g, '');
 
     const browser = await puppeteer.launch({
       args: chromium.args,
@@ -31,37 +27,84 @@ export default async function handler(
 
     const page = await browser.newPage();
 
-    // Use the modified HTML that has no @page rule
-    await page.goto(`data:text/html;charset=UTF-8,${encodeURIComponent(modifiedHtml)}`, {
+    // Wrap the HTML with styles that prevent page breaks
+    const wrappedHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              color-adjust: exact !important;
+            }
+            
+            body {
+              margin: 0;
+              padding: 20px;
+            }
+            
+            /* Prevent page breaks */
+            * {
+              page-break-inside: avoid !important;
+              page-break-before: avoid !important;
+              page-break-after: avoid !important;
+              break-inside: avoid !important;
+              break-before: avoid !important;
+              break-after: avoid !important;
+            }
+          </style>
+        </head>
+        <body>
+          ${html}
+        </body>
+      </html>
+    `;
+
+    await page.goto(`data:text/html;charset=UTF-8,${encodeURIComponent(wrappedHtml)}`, {
       waitUntil: "networkidle0",
     });
 
-    // Ensure all fonts are loaded
     await page.evaluateHandle('document.fonts.ready');
 
-    // REMOVED: await page.emulateMediaType("print");
-    // This was the main cause of the pagination problem.
+    // Get the full content height
+    const contentHeight = await page.evaluate(() => {
+      return document.documentElement.scrollHeight;
+    });
 
-    // REVISED: These options create a single PDF as long as the content.
+    // Set viewport to match content height
+    await page.setViewport({
+      width: 1200,
+      height: contentHeight,
+      deviceScaleFactor: 2, // Higher quality
+    });
+
+    // Use screenshot instead of PDF for true single-page output
+    // Or use PDF with calculated height
     const pdfBuffer = await page.pdf({
-      // This is the fixed width you defined in your CSS.
-      width: '317.5mm', 
-      // By OMITTING 'height', Puppeteer renders the full page height.
+      width: '210mm', // A4 width
+      height: `${Math.ceil(contentHeight * 0.264583)}mm`, // Convert pixels to mm (1px ≈ 0.264583mm)
       printBackground: true,
-      // All other print-specific options (margin, displayHeaderFooter, preferCSSPageSize)
-      // are removed as they are no longer relevant.
+      margin: {
+        top: '0mm',
+        right: '0mm',
+        bottom: '0mm',
+        left: '0mm',
+      },
+      displayHeaderFooter: false,
+      preferCSSPageSize: false, // Don't use CSS page size
+      pageRanges: '1', // Only first page
     });
 
     await browser.close();
 
-    // Supabase client - unchanged
     const supabase = createClient(
       process.env.VITE_SUPABASE_URL as string,
       process.env.VITE_SUPABASE_PUBLISHABLE_KEY as string
     );
 
     const fileName = `report-${Date.now()}.pdf`;
-
     const { data, error: uploadError } = await supabase.storage
       .from("pdf-reports")
       .upload(fileName, pdfBuffer, {
@@ -72,7 +115,10 @@ export default async function handler(
 
     if (uploadError) {
       console.error("Supabase Upload Error:", uploadError.message);
-      return res.status(500).json({ error: "Failed to upload PDF", details: uploadError.message });
+      return res.status(500).json({ 
+        error: "Failed to upload PDF", 
+        details: uploadError.message 
+      });
     }
 
     const { data: publicUrlData } = supabase.storage
@@ -87,6 +133,9 @@ export default async function handler(
   } catch (err) {
     console.error("PDF Generation Error:", err);
     const error = err instanceof Error ? err.message : "An unknown error occurred.";
-    return res.status(500).json({ error: "Internal server error", details: error });
+    return res.status(500).json({ 
+      error: "Internal server error", 
+      details: error 
+    });
   }
 }
