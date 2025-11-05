@@ -200,12 +200,12 @@ async function scrapeWithRetry(companyName: string): Promise<{
     
     try {
       // Wrap each attempt in a timeout
-      const result = await Promise.race([
+      const result: { success: boolean; data?: any; error?: string } = await Promise.race([
         attemptScrape(companyName),
         new Promise<{ success: boolean; error: string }>((_, reject) =>
           setTimeout(() => reject(new Error('Attempt timeout')), ATTEMPT_TIMEOUT)
         ),
-      ]);
+      ]) as { success: boolean; data?: any; error?: string };
 
       if (result.success) {
         console.log(`Success on attempt ${attempt}`);
