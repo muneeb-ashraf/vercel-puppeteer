@@ -48,12 +48,19 @@ async function searchByCompanyName(page: Page, companyName: string) {
   });
 
   // Filter to *include* only doc numbers starting with the specified letters
+  // AND document number length must be MORE than 6 characters
   const allowedStarters = 'BDLMNTRP';
   const filteredResults = resultsFromPage.filter(result => {
     const docNum = result.documentNumber.toUpperCase();
     if (docNum.length === 0) {
       return false; // Exclude if no document number
     }
+    
+    // Skip if document number is 6 characters or less
+    if (docNum.length <= 6) {
+      return false;
+    }
+    
     const firstLetter = docNum[0];
     return allowedStarters.includes(firstLetter);
   });
