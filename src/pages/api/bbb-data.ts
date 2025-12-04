@@ -22,6 +22,11 @@ const MIN_MATCH_SCORE = 0.65;
 // Maximum number of search attempts with different variations
 const MAX_SEARCH_ATTEMPTS = 3;
 
+/**
+ * Delay utility function (replacement for deprecated waitForTimeout)
+ */
+const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 // ============================================
 // TYPE DEFINITIONS
 // ============================================
@@ -615,7 +620,7 @@ async function searchBBB(
     });
     
     // Wait a bit for dynamic content
-    await page.waitForTimeout(2000);
+    await delay(2000);
     
     // Try to wait for results to load
     try {
