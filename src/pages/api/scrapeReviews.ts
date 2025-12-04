@@ -155,53 +155,6 @@ const BUSINESS_SUFFIXES = [
 ];
 
 /**
- * Common words that can be ignored for matching
- */
-const IGNORABLE_WORDS = [
-  'the',
-  'and',
-  '&',
-  'of',
-  'at',
-  'in',
-  'on',
-  'for',
-];
-
-/**
- * Industry-specific keywords that might appear in business names
- */
-const INDUSTRY_KEYWORDS = [
-  'roofing',
-  'plumbing',
-  'electrical',
-  'hvac',
-  'construction',
-  'contracting',
-  'contractors',
-  'contractor',
-  'builders',
-  'building',
-  'remodeling',
-  'renovation',
-  'renovations',
-  'restoration',
-  'repair',
-  'repairs',
-  'maintenance',
-  'landscaping',
-  'painting',
-  'flooring',
-  'cleaning',
-  'moving',
-  'storage',
-  'pest control',
-  'air conditioning',
-  'heating',
-  'cooling',
-];
-
-/**
  * Normalize a company name for comparison
  * Removes punctuation, extra spaces, and converts to lowercase
  */
@@ -232,66 +185,29 @@ function removeBusinessSuffixes(name: string): string {
 }
 
 /**
- * Remove ignorable words from a name
- */
-function removeIgnorableWords(name: string): string {
-  const words = name.split(' ');
-  return words
-    .filter(word => !IGNORABLE_WORDS.includes(word.toLowerCase()))
-    .join(' ');
-}
-
-/**
- * Extract core business name (without suffixes and ignorable words)
+ * Extract core business name (without suffixes)
  */
 function extractCoreName(name: string): string {
   let coreName = normalizeCompanyName(name);
   coreName = removeBusinessSuffixes(coreName);
-  coreName = removeIgnorableWords(coreName);
   return coreName.trim();
 }
 
 /**
  * Generate multiple variations of a company name for searching
+ * Only adds common business suffixes to the original name
  */
 function generateNameVariations(companyName: string): string[] {
   const variations = new Set<string>();
   const normalized = normalizeCompanyName(companyName);
-  const coreName = extractCoreName(companyName);
   
-  // 1. Original name
-  variations.add(companyName);
+  // 1. Original normalized name
   variations.add(normalized);
   
-  // 2. Core name without suffixes
-  variations.add(coreName);
-  
-  // 3. Core name with common suffixes
-  const commonSuffixes = ['LLC', 'Inc', 'Corp', 'Co', ''];
+  // 2. Add common business suffixes to original name
+  const commonSuffixes = ['llc', 'inc', 'corp', 'co', 'ltd', 'limited'];
   for (const suffix of commonSuffixes) {
-    if (suffix) {
-      variations.add(`${coreName} ${suffix}`);
-    }
-  }
-  
-  // 4. Handle "and" / "&" variations
-  if (coreName.includes(' and ')) {
-    variations.add(coreName.replace(/ and /g, ' & '));
-  }
-  if (coreName.includes(' & ')) {
-    variations.add(coreName.replace(/ & /g, ' and '));
-  }
-  
-  // 5. Handle hyphenated names
-  if (coreName.includes('-')) {
-    variations.add(coreName.replace(/-/g, ' '));
-  }
-  
-  // 6. Handle multi-word names (try first two words if name is long)
-  const words = coreName.split(' ').filter(w => w.length > 1);
-  if (words.length > 2) {
-    variations.add(words.slice(0, 2).join(' '));
-    variations.add(words.slice(0, 3).join(' '));
+    variations.add(`${normalized} ${suffix}`);
   }
   
   // Convert to array and filter empty strings
@@ -299,73 +215,8 @@ function generateNameVariations(companyName: string): string[] {
 }
 
 /**
- * Calculate Levenshtein distance between two strings
- */
-function levenshteinDistance(str1: string, str2: string): number {
-  const m = str1.length;
-  const n = str2.length;
-  
-  // Create a 2D array to store distances
-  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-  
-  // Initialize first column
-  for (let i = 0; i <= m; i++) {
-    dp[i][0] = i;
-  }
-  
-  // Initialize first row
-  for (let j = 0; j <= n; j++) {
-    dp[0][j] = j;
-  }
-  
-  // Fill in the rest of the matrix
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (str1[i - 1] === str2[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1];
-      } else {
-        dp[i][j] = 1 + Math.min(
-          dp[i - 1][j],     // deletion
-          dp[i][j - 1],     // insertion
-          dp[i - 1][j - 1]  // substitution
-        );
-      }
-    }
-  }
-  
-  return dp[m][n];
-}
-
-/**
- * Calculate similarity score between two strings (0 to 1)
- */
-function calculateSimilarity(str1: string, str2: string): number {
-  const s1 = str1.toLowerCase();
-  const s2 = str2.toLowerCase();
-  
-  if (s1 === s2) return 1;
-  
-  const maxLength = Math.max(s1.length, s2.length);
-  if (maxLength === 0) return 1;
-  
-  const distance = levenshteinDistance(s1, s2);
-  return 1 - (distance / maxLength);
-}
-
-/**
- * Check if one string contains all significant words from another
- */
-function containsAllWords(haystack: string, needle: string): boolean {
-  const haystackWords = new Set(haystack.toLowerCase().split(' ').filter(w => w.length > 1));
-  const needleWords = needle.toLowerCase().split(' ').filter(w => w.length > 2);
-  
-  // At least 80% of words should match
-  const matchCount = needleWords.filter(word => haystackWords.has(word)).length;
-  return needleWords.length > 0 && (matchCount / needleWords.length) >= 0.8;
-}
-
-/**
- * Calculate a comprehensive match score between search name and result name
+ * Calculate a simplified match score between search name and result name
+ * Only allows exact matches or core name matches
  */
 function calculateMatchScore(searchName: string, resultName: string): { score: number; matchType: string } {
   const searchCore = extractCoreName(searchName);
@@ -378,49 +229,13 @@ function calculateMatchScore(searchName: string, resultName: string): { score: n
     return { score: 1.0, matchType: 'exact' };
   }
   
-  // 2. Core name exact match
-  if (searchCore === resultCore) {
+  // 2. Core name exact match (only difference is suffix like LLC, Inc, etc.)
+  if (searchCore === resultCore && searchCore.length > 0) {
     return { score: 0.95, matchType: 'core_exact' };
   }
   
-  // 3. One contains the other completely
-  if (resultCore.includes(searchCore) || searchCore.includes(resultCore)) {
-    const containmentRatio = Math.min(searchCore.length, resultCore.length) / 
-                             Math.max(searchCore.length, resultCore.length);
-    return { score: 0.85 + (containmentRatio * 0.1), matchType: 'containment' };
-  }
-  
-  // 4. Word-based matching
-  if (containsAllWords(resultCore, searchCore)) {
-    return { score: 0.80, matchType: 'word_match' };
-  }
-  
-  // 5. Fuzzy similarity on core names
-  const coreSimilarity = calculateSimilarity(searchCore, resultCore);
-  if (coreSimilarity >= 0.85) {
-    return { score: coreSimilarity * 0.9, matchType: 'fuzzy_high' };
-  }
-  
-  // 6. Fuzzy similarity on full normalized names
-  const fullSimilarity = calculateSimilarity(searchNormalized, resultNormalized);
-  if (fullSimilarity >= 0.75) {
-    return { score: fullSimilarity * 0.85, matchType: 'fuzzy_medium' };
-  }
-  
-  // 7. Partial word overlap
-  const searchWords = searchCore.split(' ').filter(w => w.length > 2);
-  const resultWords = resultCore.split(' ').filter(w => w.length > 2);
-  const commonWords = searchWords.filter(w => resultWords.some(rw => rw.includes(w) || w.includes(rw)));
-  
-  if (commonWords.length > 0 && searchWords.length > 0) {
-    const overlapRatio = commonWords.length / searchWords.length;
-    if (overlapRatio >= 0.5) {
-      return { score: 0.6 + (overlapRatio * 0.2), matchType: 'partial_overlap' };
-    }
-  }
-  
-  // 8. Low similarity fallback
-  return { score: Math.max(coreSimilarity, fullSimilarity) * 0.5, matchType: 'low_similarity' };
+  // No match
+  return { score: 0.0, matchType: 'no_match' };
 }
 
 /**
@@ -429,7 +244,7 @@ function calculateMatchScore(searchName: string, resultName: string): { score: n
 function findBestMatch(
   searchName: string, 
   results: GooglePlaceSearchResult[], 
-  minScore: number = 0.6
+  minScore: number = 0.9
 ): MatchResult | null {
   const searchVariations = generateNameVariations(searchName);
   let bestMatch: MatchResult | null = null;
@@ -492,72 +307,49 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
     let allResults: GooglePlaceSearchResult[] = [];
     const searchedQueries: string[] = [];
     
-    // Step 1: Try multiple search queries to get comprehensive results
-    // We'll try up to 3 variations to find the business
-    const queriesToTry = [
-      `${companyName} ${state}`,                    // Original with state
-      `${extractCoreName(companyName)} ${state}`,   // Core name with state
-      `${nameVariations[0]} roofing ${state}`,      // With industry keyword (if applicable)
-    ].filter((q, i, arr) => arr.indexOf(q) === i); // Remove duplicates
+    // Step 1: Search with original company name + state
+    const searchQuery = `${companyName} ${state}`;
+    searchedQueries.push(searchQuery);
     
-    for (const searchQuery of queriesToTry.slice(0, 3)) {
-      if (searchedQueries.includes(searchQuery)) continue;
-      searchedQueries.push(searchQuery);
-      
-      console.log(`[GOOGLE_REVIEWS_DEBUG] Searching: "${searchQuery}"`);
-      
-      const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(searchQuery)}&key=${googleApiKey}`;
-      
-      try {
-        const searchResponse = await fetch(searchUrl);
-        
-        if (!searchResponse.ok) {
-          console.error(`[GOOGLE_REVIEWS_DEBUG] Search failed for query: ${searchQuery}`);
-          continue;
-        }
-        
-        const searchData: GooglePlaceSearchResponse = await searchResponse.json();
-        
-        if (searchData.status === 'OK' && searchData.results) {
-          // Add unique results
-          for (const result of searchData.results) {
-            if (!allResults.some(r => r.place_id === result.place_id)) {
-              allResults.push(result);
-            }
-          }
-          console.log(`[GOOGLE_REVIEWS_DEBUG] Found ${searchData.results.length} results (Total unique: ${allResults.length})`);
-        }
-      } catch (err) {
-        console.error(`[GOOGLE_REVIEWS_DEBUG] Error in search query: ${searchQuery}`, err);
-      }
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Searching: "${searchQuery}"`);
+    
+    const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(searchQuery)}&key=${googleApiKey}`;
+    
+    const searchResponse = await fetch(searchUrl);
+    
+    if (!searchResponse.ok) {
+      throw new Error(`Google Places Search API failed: ${searchResponse.status} ${searchResponse.statusText}`);
     }
     
-    if (allResults.length === 0) {
-      console.log(`[GOOGLE_REVIEWS_DEBUG] No results found after all search attempts`);
+    const searchData: GooglePlaceSearchResponse = await searchResponse.json();
+    
+    if (searchData.status !== 'OK' || !searchData.results || searchData.results.length === 0) {
+      console.log(`[GOOGLE_REVIEWS_DEBUG] No results found`);
       return {
         success: false,
         message: "This company doesn't have any Google Reviews yet.",
         rating: null,
         reviews: [],
         business_found: false,
-        search_query: searchedQueries.join(' | ')
+        search_query: searchQuery
       };
     }
+    
+    allResults = searchData.results;
+    console.log(`[GOOGLE_REVIEWS_DEBUG] Found ${allResults.length} results`);
 
-    console.log(`[GOOGLE_REVIEWS_DEBUG] Total unique results to evaluate: ${allResults.length}`);
-
-    // Step 2: Find the best matching business using fuzzy matching
-    const bestMatch = findBestMatch(companyName, allResults, 0.6);
+    // Step 2: Find the best matching business using exact matching only
+    const bestMatch = findBestMatch(companyName, allResults, 0.9);
     
     if (!bestMatch) {
-      console.log(`[GOOGLE_REVIEWS_DEBUG] No suitable match found (min score: 0.6)`);
+      console.log(`[GOOGLE_REVIEWS_DEBUG] No exact match found (min score: 0.9)`);
       return {
         success: false,
         message: "This company doesn't have any Google Reviews yet.",
         rating: null,
         reviews: [],
         business_found: false,
-        search_query: searchedQueries.join(' | ')
+        search_query: searchQuery
       };
     }
 
@@ -613,7 +405,7 @@ async function fetchGoogleReviews(companyName: string, state: string = 'Florida'
         rating: null,
         reviews: [],
         business_found: false,
-        search_query: searchedQueries.join(' | ')
+        search_query: searchQuery
       };
     }
     
