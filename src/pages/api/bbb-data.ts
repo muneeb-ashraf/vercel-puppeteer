@@ -459,7 +459,11 @@ function parseSearchResults(html: string): ParsedResultCard[] {
     return results;
   }
   
-  for (const card of resultCards) {
+  // Convert NodeListOf to Array for iteration compatibility
+  const cards = Array.from(resultCards);
+  
+  for (let i = 0; i < cards.length; i++) {
+    const card = cards[i];
     try {
       // Company name - try multiple selectors
       const nameSelectors = [
