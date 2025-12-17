@@ -27,7 +27,7 @@ export default async function handler(
 
     const page = await browser.newPage();
 
-    // Wrap the HTML with styles that prevent page breaks
+    // Wrap the HTML with styles for A4 printing
     const wrappedHtml = `
       <!DOCTYPE html>
       <html>
@@ -40,19 +40,14 @@ export default async function handler(
               color-adjust: exact !important;
             }
             
+            @page {
+              size: A4;
+              margin: 0;
+            }
+            
             body {
               margin: 0;
               padding: 20px;
-            }
-            
-            /* Prevent page breaks */
-            * {
-              page-break-inside: avoid !important;
-              page-break-before: avoid !important;
-              page-break-after: avoid !important;
-              break-inside: avoid !important;
-              break-before: avoid !important;
-              break-after: avoid !important;
             }
           </style>
         </head>
@@ -68,33 +63,24 @@ export default async function handler(
 
     await page.evaluateHandle('document.fonts.ready');
 
-    // Get the full content height
-    const contentHeight = await page.evaluate(() => {
-      return document.documentElement.scrollHeight;
-    });
-
-    // Set viewport to match content - convert 317.5mm to pixels (317.5mm ≈ 1200px at 96dpi)
-    const viewportWidth = Math.ceil(317.5 / 0.264583); // Convert mm to pixels
+    // Set viewport to A4 dimensions (210mm x 297mm at 96dpi)
     await page.setViewport({
-      width: viewportWidth,
-      height: contentHeight,
-      deviceScaleFactor: 2, // Higher quality
+      width: 794,  // 210mm in pixels at 96dpi
+      height: 1123, // 297mm in pixels at 96dpi
+      deviceScaleFactor: 2,
     });
 
-    // Use PDF with calculated height and 317.5mm width
+    // Generate A4 PDF
     const pdfBuffer = await page.pdf({
-      width: '317.5mm',
-      height: `${Math.ceil(contentHeight * 0.264583)}mm`, // Convert pixels to mm (1px ≈ 0.264583mm)
+      format: 'A4',
       printBackground: true,
       margin: {
-        top: '0mm',
-        right: '0mm',
-        bottom: '0mm',
-        left: '0mm',
+        top: '10mm',
+        right: '10mm',
+        bottom: '10mm',
+        left: '10mm',
       },
       displayHeaderFooter: false,
-      preferCSSPageSize: false, // Don't use CSS page size
-      pageRanges: '1', // Only first page
     });
 
     await browser.close();
