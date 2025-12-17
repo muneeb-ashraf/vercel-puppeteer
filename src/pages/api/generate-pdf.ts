@@ -76,9 +76,9 @@ export default async function handler(
       printBackground: true,
       margin: {
         top: '10mm',
-        right: '10mm',
+        right: '0mm',
         bottom: '10mm',
-        left: '10mm',
+        left: '0mm',
       },
       displayHeaderFooter: false,
     });
@@ -125,3 +125,4 @@ export default async function handler(
     });
   }
 }
+
