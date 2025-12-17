@@ -74,10 +74,11 @@ export default async function handler(
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
+      preferCSSPageSize: true,
       margin: {
-        top: '10mm',
+        top: '0mm',
         right: '0mm',
-        bottom: '10mm',
+        bottom: '0mm',
         left: '0mm',
       },
       displayHeaderFooter: false,
