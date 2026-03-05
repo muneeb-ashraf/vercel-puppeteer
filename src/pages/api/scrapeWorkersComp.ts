@@ -525,6 +525,7 @@ async function scrapeWithRetry(companyName: string): Promise<{
   data?: any;
   error?: string;
   attempts: number;
+  partialSuccess?: boolean;
 }> {
   const errors: string[] = [];
 
@@ -545,7 +546,8 @@ async function scrapeWithRetry(companyName: string): Promise<{
         return {
           success: true,
           data: result.data,
-          attempts: attempt
+          attempts: attempt,
+          partialSuccess: result.partialSuccess
         };
       }
 
