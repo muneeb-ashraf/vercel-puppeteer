@@ -424,8 +424,8 @@ async function attemptScrape(companyName: string): Promise<ScrapeResult> {
     page.setDefaultTimeout(30000);
 
     // Initialize result containers
-    let proofOfCoverageResult: { tbody?: string; message?: string } | null = null;
-    let exemptionResult: { tbody?: string; message?: string } | null = null;
+    let proofOfCoverageResult: { tbody?: string; message?: string } | undefined = undefined;
+    let exemptionResult: { tbody?: string; message?: string } | undefined = undefined;
     let classCodeDetails: ClassCodeDetails | null = null;
     const errors: string[] = [];
 
@@ -470,8 +470,8 @@ async function attemptScrape(companyName: string): Promise<ScrapeResult> {
     await closeBrowserSafely(browser);
 
     // Determine success status
-    const hasProofData = proofOfCoverageResult !== null;
-    const hasExemptionData = exemptionResult !== null;
+    const hasProofData = proofOfCoverageResult !== undefined;
+    const hasExemptionData = exemptionResult !== undefined;
 
     if (!hasProofData && !hasExemptionData) {
       // Both primary scrapes failed
@@ -499,8 +499,8 @@ async function attemptScrape(companyName: string): Promise<ScrapeResult> {
       success: true,
       partialSuccess: true,
       data: {
-        proofOfCoverage: proofOfCoverageResult || undefined,
-        exemption: exemptionResult || undefined,
+        proofOfCoverage: proofOfCoverageResult,
+        exemption: exemptionResult,
         classCodeDetails: classCodeDetails || null
       },
       error: errors.length > 0 ? `Partial success. Errors: ${errors.join(' | ')}` : undefined
