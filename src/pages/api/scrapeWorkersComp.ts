@@ -6,14 +6,24 @@ import puppeteer, { Page, Browser } from 'puppeteer-core';
 // Configuration
 // -------------------
 const MAX_ATTEMPTS = 2; // 2 attempts to stay within 60s limit
-const ATTEMPT_TIMEOUT = 25000; // 25 seconds per attempt
+const ATTEMPT_TIMEOUT = 25000; // 25 seconds per attempt (increased to fit 3 scrapes)
 const BROWSER_LAUNCH_TIMEOUT = 15000; // 15 seconds
 const MIN_COMPANY_NAME_LENGTH = 3;
-const TARGET_URL = 'https://dwcdataportal.fldfs.com/ProofOfCoverage.aspx';
+const PROOF_OF_COVERAGE_URL = 'https://dwcdataportal.fldfs.com/ProofOfCoverage.aspx';
+const EXEMPTION_URL = 'https://dwcdataportal.fldfs.com/Exemption.aspx';
+const INSURANCE_CLASS_CODE_BASE_URL = 'https://www.insurancexdate.com/classreport.php';
 
 // -------------------
 // Type Definitions
 // -------------------
+interface ClassCodeDetails {
+  classCode: string;
+  industry: string;
+  phraseology: string;
+  description: string;
+  category: string;
+}
+
 interface WorkersCompData {
   success: boolean;
   data?: {
@@ -31,10 +41,18 @@ interface WorkersCompData {
 interface ScrapeResult {
   success: boolean;
   data?: {
-    tbody?: string;
-    message?: string;
+    proofOfCoverage?: {
+      tbody?: string;
+      message?: string;
+    };
+    exemption?: {
+      tbody?: string;
+      message?: string;
+    };
+    classCodeDetails?: ClassCodeDetails | null;
   };
   error?: string;
+  partialSuccess?: boolean;
 }
 
 // -------------------
@@ -64,10 +82,10 @@ async function findSelector(
 }
 
 /**
- * Extract results from the page (tbody HTML or "No Policy Current" message)
+ * Extract results from the page (tbody HTML or "No Policy Currently In Effect" message)
  */
 async function extractResults(page: Page): Promise<{ tbody?: string; message?: string }> {
-  // Check for "No Policy Current" message first
+  // Check for "No Policy Currently In Effect" message first
   const noResultsSelectors = [
     '#ContentPlaceHolder1_lblNotFound2',
     'span[id*="lblNotFound"]',
@@ -79,9 +97,9 @@ async function extractResults(page: Page): Promise<{ tbody?: string; message?: s
       const noResultsElement = await page.$(selector);
       if (noResultsElement) {
         const messageText = await page.evaluate(el => el?.textContent, noResultsElement);
-        if (messageText?.includes('No Policy Current')) {
-          console.log('[WORKERS_COMP] Found "No Policy Current" message');
-          return { message: 'No Policy Current' };
+        if (messageText?.includes('No Policy Currently In Effect')) {
+          console.log('[WORKERS_COMP] Found "No Policy Currently In Effect" message');
+          return { message: 'No Policy Currently In Effect' };
         }
       }
     } catch (error) {
@@ -105,6 +123,166 @@ async function extractResults(page: Page): Promise<{ tbody?: string; message?: s
   }
 
   throw new Error('Results page loaded but no data table or "no results" message found');
+}
+
+/**
+ * Extract exemption results from the page (tbody HTML or "No record found" message)
+ */
+async function extractExemptionResults(page: Page): Promise<{ tbody?: string; message?: string }> {
+  // Check for "No record found" message
+  const noRecordElement = await page.$('#ContentPlaceHolder1_lblNotFound');
+  if (noRecordElement) {
+    const messageText = await page.evaluate(el => el?.textContent, noRecordElement);
+    if (messageText?.includes('No record found')) {
+      console.log('[WORKERS_COMP] Found "No record found" message for exemption');
+      return { message: 'No record found' };
+    }
+  }
+
+  // Extract table tbody
+  const tbodyHTML = await page.evaluate(() => {
+    const table = document.querySelector('table#ContentPlaceHolder1_DataGrid_Exemption');
+    if (table) {
+      const tbody = table.querySelector('tbody');
+      return tbody ? tbody.outerHTML : null;
+    }
+    return null;
+  });
+
+  if (tbodyHTML) {
+    console.log('[WORKERS_COMP] Successfully extracted exemption tbody HTML');
+    return { tbody: tbodyHTML };
+  }
+
+  throw new Error('Exemption results page loaded but no data table or "no record found" message found');
+}
+
+/**
+ * Extract the Governing Class Code from the Proof of Coverage page
+ */
+async function extractGoverningClassCode(page: Page): Promise<string | null> {
+  try {
+    // The Governing Class Code is in a span with ID like ContentPlaceHolder1_DataGrid_POC_Label9_0
+    const classCode = await page.evaluate(() => {
+      // Find the th element with "Governing Class Code" text
+      const headers = Array.from(document.querySelectorAll('th'));
+      const governingClassHeader = headers.find(th =>
+        th.textContent?.includes('Governing Class Code')
+      );
+
+      if (!governingClassHeader) return null;
+
+      // Find the corresponding td in the same column
+      const headerIndex = Array.from(governingClassHeader.parentElement?.children || [])
+        .indexOf(governingClassHeader);
+
+      // Get the tbody row
+      const tbody = governingClassHeader.closest('table')?.querySelector('tbody');
+      if (!tbody) return null;
+
+      const firstDataRow = tbody.querySelector('tr');
+      if (!firstDataRow) return null;
+
+      const targetCell = firstDataRow.children[headerIndex] as HTMLElement;
+      if (!targetCell) return null;
+
+      // Extract the span content (e.g., ContentPlaceHolder1_DataGrid_POC_Label9_0)
+      const span = targetCell.querySelector('span');
+      return span ? span.textContent?.trim() || null : null;
+    });
+
+    if (classCode) {
+      console.log('[WORKERS_COMP] Found Governing Class Code:', classCode);
+      return classCode;
+    }
+
+    console.log('[WORKERS_COMP] No Governing Class Code found in Proof of Coverage');
+    return null;
+  } catch (error) {
+    console.error('[WORKERS_COMP] Error extracting Governing Class Code:', error);
+    return null;
+  }
+}
+
+/**
+ * Scrape class code details from insurancexdate.com
+ */
+async function scrapeClassCodeDetails(
+  page: Page,
+  classCode: string
+): Promise<ClassCodeDetails | null> {
+  try {
+    console.log('[WORKERS_COMP] Starting class code details scrape for code:', classCode);
+
+    // Navigate to search page
+    const searchUrl = `${INSURANCE_CLASS_CODE_BASE_URL}?search=${classCode}&state=FL`;
+    await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    // Wait for results table
+    await page.waitForSelector('#dataTableClassList', { timeout: 10000 }).catch(() => {
+      console.log('[WORKERS_COMP] Results table not found');
+    });
+
+    // Find and click the first result row
+    const detailPageUrl = await page.evaluate(() => {
+      const table = document.querySelector('#dataTableClassList');
+      if (!table) return null;
+
+      const firstRow = table.querySelector('tr[visible="true"]');
+      if (!firstRow) return null;
+
+      // Extract the href from the clickable row or construct URL from data
+      // The URL pattern is: /class/FL/{SLUG}/{description-hyphenated}
+      const link = firstRow.querySelector('a');
+      if (link) {
+        return link.href;
+      }
+
+      return null;
+    });
+
+    if (!detailPageUrl) {
+      console.log('[WORKERS_COMP] No detail page URL found for class code');
+      return null;
+    }
+
+    // Navigate to detail page
+    await page.goto(detailPageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    // Extract data from the detail page
+    const details = await page.evaluate(() => {
+      // Extract fields from the General section
+      const extractFieldByLabel = (labelText: string): string => {
+        const labels = Array.from(document.querySelectorAll('label, strong, b'));
+        const label = labels.find(el => el.textContent?.includes(labelText));
+        if (!label) return '';
+
+        // Get the next sibling or parent's next sibling content
+        let valueElement = label.nextElementSibling;
+        if (!valueElement) {
+          valueElement = label.parentElement?.nextElementSibling || null;
+        }
+
+        return valueElement?.textContent?.trim() || '';
+      };
+
+      return {
+        classCode: extractFieldByLabel('Class Code'),
+        industry: extractFieldByLabel('Industry'),
+        phraseology: document.querySelector('h4')?.textContent?.trim() || '',
+        description: document.querySelector('div:has(> p) p')?.textContent?.trim() || '',
+        category: document.querySelector('h2')?.textContent?.trim() || ''
+      };
+    });
+
+    console.log('[WORKERS_COMP] Successfully extracted class code details');
+    return details;
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[WORKERS_COMP] Class code details scrape failed:', errorMessage);
+    return null;
+  }
 }
 
 // -------------------
@@ -135,74 +313,197 @@ async function closeBrowserSafely(browser: Browser | null): Promise<void> {
 }
 
 // -------------------
+// Scraping Functions
+// -------------------
+
+/**
+ * Scrape Proof of Coverage data
+ */
+async function scrapeProofOfCoverage(page: Page, companyName: string): Promise<{ tbody?: string; message?: string }> {
+  console.log('[WORKERS_COMP] Starting Proof of Coverage scrape');
+
+  // Navigate to form
+  await page.goto(PROOF_OF_COVERAGE_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+
+  // Find and fill employer name field
+  const employerNameSelectors = [
+    '#ContentPlaceHolder1_txtEmployerName',
+    'input[name*="EmployerName"]',
+    'input[name*="Employer"]',
+    'input[type="text"][id*="Employer"]',
+    'input[type="text"][name*="txt"]'
+  ];
+  const employerFieldSelector = await findSelector(page, employerNameSelectors, 'employer name field');
+  await page.type(employerFieldSelector, companyName, { delay: 50 });
+
+  // Find and click search button
+  const searchButtonSelectors = [
+    '#ContentPlaceHolder1_btnSearch',
+    'input[type="submit"][value*="Search"]',
+    'button[id*="Search"]',
+    'input[name*="btnSearch"]',
+    'input[type="submit"][id*="btn"]'
+  ];
+  const searchButtonSelector = await findSelector(page, searchButtonSelectors, 'search button');
+  await page.click(searchButtonSelector);
+
+  // Wait for results
+  await Promise.race([
+    page.waitForSelector('table.DataGrid_POC', { timeout: 30000 }),
+    page.waitForSelector('#ContentPlaceHolder1_lblNotFound2', { timeout: 30000 }),
+    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
+  ]).catch(() => {
+    console.log('[WORKERS_COMP] Wait completed for Proof of Coverage');
+  });
+
+  // Wait for AJAX/UpdatePanel
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Extract results using existing extractResults() function
+  return await extractResults(page);
+}
+
+/**
+ * Scrape Exemption data
+ */
+async function scrapeExemption(page: Page, companyName: string): Promise<{ tbody?: string; message?: string }> {
+  console.log('[WORKERS_COMP] Starting Exemption scrape');
+
+  // Navigate to exemption form
+  await page.goto(EXEMPTION_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+
+  // Find and fill employer name field (same selectors as Proof of Coverage)
+  const employerNameSelectors = [
+    '#ContentPlaceHolder1_txtEmployerName',
+    'input[name*="EmployerName"]',
+    'input[name*="Employer"]',
+    'input[type="text"][id*="Employer"]',
+    'input[type="text"][name*="txt"]'
+  ];
+  const employerFieldSelector = await findSelector(page, employerNameSelectors, 'employer name field');
+  await page.type(employerFieldSelector, companyName, { delay: 50 });
+
+  // Find and click search button
+  const searchButtonSelectors = [
+    '#ContentPlaceHolder1_btnSearch',
+    'input[type="submit"][value*="Search"]',
+    'button[id*="Search"]',
+    'input[name*="btnSearch"]',
+    'input[type="submit"][id*="btn"]'
+  ];
+  const searchButtonSelector = await findSelector(page, searchButtonSelectors, 'search button');
+  await page.click(searchButtonSelector);
+
+  // Wait for results
+  await Promise.race([
+    page.waitForSelector('table#ContentPlaceHolder1_DataGrid_Exemption', { timeout: 30000 }),
+    page.waitForSelector('#ContentPlaceHolder1_lblNotFound', { timeout: 30000 }),
+    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
+  ]).catch(() => {
+    console.log('[WORKERS_COMP] Wait completed for Exemption');
+  });
+
+  // Wait for AJAX/UpdatePanel
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Extract exemption results
+  return await extractExemptionResults(page);
+}
+
+// -------------------
 // Single Attempt Logic
 // -------------------
 async function attemptScrape(companyName: string): Promise<ScrapeResult> {
   let browser: Browser | null = null;
 
   try {
-    // Launch browser with timeout
+    // Launch browser once
     console.log('[WORKERS_COMP] Launching browser...');
     browser = await launchBrowserWithTimeout();
     const page = await browser.newPage();
-
-    // Set page timeout
     page.setDefaultTimeout(30000);
 
-    // Navigate to the form page
-    console.log('[WORKERS_COMP] Navigating to:', TARGET_URL);
-    await page.goto(TARGET_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+    // Initialize result containers
+    let proofOfCoverageResult: { tbody?: string; message?: string } | null = null;
+    let exemptionResult: { tbody?: string; message?: string } | null = null;
+    let classCodeDetails: ClassCodeDetails | null = null;
+    const errors: string[] = [];
 
-    // Define selector options for employer name field
-    const employerNameSelectors = [
-      '#ContentPlaceHolder1_txtEmployerName',
-      'input[name*="EmployerName"]',
-      'input[name*="Employer"]',
-      'input[type="text"][id*="Employer"]',
-      'input[type="text"][name*="txt"]'
-    ];
+    // Scrape Proof of Coverage (sequential, not parallel)
+    try {
+      proofOfCoverageResult = await scrapeProofOfCoverage(page, companyName);
+      console.log('[WORKERS_COMP] Proof of Coverage scrape completed successfully');
 
-    // Find and fill employer name field
-    const employerFieldSelector = await findSelector(page, employerNameSelectors, 'employer name field');
-    console.log('[WORKERS_COMP] Typing company name:', companyName);
-    await page.type(employerFieldSelector, companyName, { delay: 50 });
+      // If Proof of Coverage has data (not a message), try to extract and scrape class code
+      if (proofOfCoverageResult && proofOfCoverageResult.tbody) {
+        try {
+          const classCode = await extractGoverningClassCode(page);
+          if (classCode) {
+            classCodeDetails = await scrapeClassCodeDetails(page, classCode);
+            if (classCodeDetails) {
+              console.log('[WORKERS_COMP] Class code details scrape completed successfully');
+            }
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[WORKERS_COMP] Class code details scrape failed:', errorMessage);
+          errors.push(`Class Code Details: ${errorMessage}`);
+          // Don't fail the entire request if class code scraping fails
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[WORKERS_COMP] Proof of Coverage scrape failed:', errorMessage);
+      errors.push(`Proof of Coverage: ${errorMessage}`);
+    }
 
-    // Define selector options for search button
-    const searchButtonSelectors = [
-      '#ContentPlaceHolder1_btnSearch',
-      'input[type="submit"][value*="Search"]',
-      'button[id*="Search"]',
-      'input[name*="btnSearch"]',
-      'input[type="submit"][id*="btn"]'
-    ];
-
-    // Find and click search button
-    const searchButtonSelector = await findSelector(page, searchButtonSelectors, 'search button');
-    console.log('[WORKERS_COMP] Clicking search button');
-    await page.click(searchButtonSelector);
-
-    // Wait for results (either data table or no-results message)
-    console.log('[WORKERS_COMP] Waiting for results...');
-    await Promise.race([
-      page.waitForSelector('table.DataGrid_POC', { timeout: 30000 }),
-      page.waitForSelector('#ContentPlaceHolder1_lblNotFound2', { timeout: 30000 }),
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
-    ]).catch(() => {
-      // Ignore timeout - we'll check for results anyway
-      console.log('[WORKERS_COMP] Wait completed (may have timed out, checking for results)');
-    });
-
-    // Additional wait for AJAX/UpdatePanel (ASP.NET pattern)
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Extract results
-    const results = await extractResults(page);
+    // Scrape Exemption
+    try {
+      exemptionResult = await scrapeExemption(page, companyName);
+      console.log('[WORKERS_COMP] Exemption scrape completed successfully');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[WORKERS_COMP] Exemption scrape failed:', errorMessage);
+      errors.push(`Exemption: ${errorMessage}`);
+    }
 
     await closeBrowserSafely(browser);
 
+    // Determine success status
+    const hasProofData = proofOfCoverageResult !== null;
+    const hasExemptionData = exemptionResult !== null;
+
+    if (!hasProofData && !hasExemptionData) {
+      // Both primary scrapes failed
+      return {
+        success: false,
+        error: `Both scrapes failed. Errors: ${errors.join(' | ')}`
+      };
+    }
+
+    if (hasProofData && hasExemptionData) {
+      // Both primary scrapes succeeded
+      return {
+        success: true,
+        data: {
+          proofOfCoverage: proofOfCoverageResult,
+          exemption: exemptionResult,
+          classCodeDetails: classCodeDetails || null
+        },
+        partialSuccess: errors.length > 0 // Set partial if class code failed but others succeeded
+      };
+    }
+
+    // Partial success - at least one primary scrape succeeded
     return {
       success: true,
-      data: results
+      partialSuccess: true,
+      data: {
+        proofOfCoverage: proofOfCoverageResult || undefined,
+        exemption: exemptionResult || undefined,
+        classCodeDetails: classCodeDetails || null
+      },
+      error: errors.length > 0 ? `Partial success. Errors: ${errors.join(' | ')}` : undefined
     };
 
   } catch (error) {
@@ -339,20 +640,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log(`[WORKERS_COMP] Request completed in ${duration}ms after ${result.attempts} attempts`);
 
     if (result.success) {
-      return res.status(200).json({
+      const responseData: any = {
         success: true,
         data: {
-          ...result.data,
-          companyName: trimmedCompanyName,
-          message: result.data?.tbody
-            ? 'Workers\' Compensation coverage data found'
-            : result.data?.message
+          proofOfCoverage: result.data?.proofOfCoverage,
+          exemption: result.data?.exemption,
+          classCodeDetails: result.data?.classCodeDetails || null,
+          companyName: trimmedCompanyName
         },
         meta: {
           duration,
           attempts: result.attempts
         }
-      });
+      };
+
+      // Add warning if partial success
+      if (result.partialSuccess) {
+        responseData.warning = 'Partial success - one or more scrapes failed';
+        responseData.partialError = result.error;
+      }
+
+      return res.status(200).json(responseData);
     } else {
       return res.status(500).json({
         success: false,
