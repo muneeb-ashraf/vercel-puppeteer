@@ -699,18 +699,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const trimmedCompanyName = companyName.trim();
 
-  if (trimmedCompanyName.length < MIN_COMPANY_NAME_LENGTH) {
+  // Remove all punctuation from company name (commas, periods, apostrophes, etc.)
+  const sanitizedCompanyName = trimmedCompanyName.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()'"@+?\\[\]]/g, '').replace(/\s+/g, ' ').trim();
+
+  if (sanitizedCompanyName.length < MIN_COMPANY_NAME_LENGTH) {
     return res.status(400).json({
       success: false,
       error: `Company name must be at least ${MIN_COMPANY_NAME_LENGTH} characters`
     });
   }
 
-  console.log(`[WORKERS_COMP] Starting scrape request for: "${trimmedCompanyName}"`);
+  if (trimmedCompanyName !== sanitizedCompanyName) {
+    console.log(`[WORKERS_COMP] Original company name: "${trimmedCompanyName}"`);
+    console.log(`[WORKERS_COMP] Sanitized company name: "${sanitizedCompanyName}"`);
+  }
+
+  console.log(`[WORKERS_COMP] Starting scrape request for: "${sanitizedCompanyName}"`);
   const startTime = Date.now();
 
   try {
-    const result = await scrapeWithRetry(trimmedCompanyName);
+    const result = await scrapeWithRetry(sanitizedCompanyName);
 
     const duration = Date.now() - startTime;
     console.log(`[WORKERS_COMP] Request completed in ${duration}ms after ${result.attempts} attempts`);
@@ -722,7 +730,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           proofOfCoverage: result.data?.proofOfCoverage,
           exemption: result.data?.exemption,
           classCodeDetails: result.data?.classCodeDetails || null,
-          companyName: trimmedCompanyName
+          companyName: sanitizedCompanyName
         },
         meta: {
           duration,
