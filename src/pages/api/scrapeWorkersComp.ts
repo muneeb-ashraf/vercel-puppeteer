@@ -164,31 +164,65 @@ function extractGoverningClassCode(tbodyHTML: string): string | null {
   try {
     console.log('[WORKERS_COMP] Attempting to extract Governing Class Code from tbody HTML');
 
-    // Parse the tbody HTML to find the span containing the class code
-    // The span has an ID pattern like: ContentPlaceHolder1_DataGrid_POC_Label9_0
-    // Strategy: Look for spans with IDs matching this pattern
-    const spanIdPattern = /ContentPlaceHolder1_DataGrid_POC_Label(\d+)_0/g;
-    const matches = tbodyHTML.match(/<span[^>]*id="ContentPlaceHolder1_DataGrid_POC_Label\d+_0"[^>]*>([^<]+)<\/span>/);
+    // First, try to find the "Governing Class Code" header and get its column index
+    const headerMatch = tbodyHTML.match(/<th[^>]*>([^<]*Governing Class Code[^<]*)<\/th>/i);
 
-    if (matches && matches[1]) {
-      const classCode = matches[1].trim();
-      console.log('[WORKERS_COMP] ✓ Found Governing Class Code:', classCode);
-      return classCode;
+    if (headerMatch) {
+      console.log('[WORKERS_COMP] Found "Governing Class Code" header in tbody');
+
+      // Split tbody into rows
+      const rows = tbodyHTML.split(/<\/?tr[^>]*>/i).filter(row => row.trim());
+
+      if (rows.length >= 2) {
+        const headerRow = rows[0];
+        const dataRow = rows[1];
+
+        // Find all th elements in header row
+        const thMatches = headerRow.match(/<th[^>]*>.*?<\/th>/gi);
+        if (thMatches) {
+          // Find the index of "Governing Class Code" header
+          const govClassIndex = thMatches.findIndex(th => th.includes('Governing Class Code'));
+
+          if (govClassIndex !== -1) {
+            console.log('[WORKERS_COMP] Governing Class Code is at column index:', govClassIndex);
+
+            // Find all td elements in data row
+            const tdMatches = dataRow.match(/<td[^>]*>[\s\S]*?<\/td>/gi);
+            if (tdMatches && tdMatches[govClassIndex]) {
+              // Extract the span content from the corresponding td
+              const spanMatch = tdMatches[govClassIndex].match(/<span[^>]*>([^<]+)<\/span>/);
+              if (spanMatch && spanMatch[1]) {
+                const classCode = spanMatch[1].trim();
+                console.log('[WORKERS_COMP] ✓ Found Governing Class Code:', classCode);
+                return classCode;
+              }
+            }
+          }
+        }
+      }
     }
 
-    // Fallback: Try to find by searching for the "Governing Class Code" header
-    // and extracting the corresponding cell value
-    if (tbodyHTML.includes('Governing Class Code')) {
-      console.log('[WORKERS_COMP] Found "Governing Class Code" text in tbody, trying alternative extraction');
+    // Fallback 1: Look specifically for Label9_0 (typically the Governing Class Code column)
+    const label9Match = tbodyHTML.match(/<span[^>]*id="ContentPlaceHolder1_DataGrid_POC_Label9_0"[^>]*>([^<]+)<\/span>/);
+    if (label9Match && label9Match[1]) {
+      const classCode = label9Match[1].trim();
+      // Verify it looks like a class code (5 digits)
+      if (/^\d{5}$/.test(classCode)) {
+        console.log('[WORKERS_COMP] ✓ Found Governing Class Code via Label9_0:', classCode);
+        return classCode;
+      }
+    }
 
-      // Look for span elements that might contain the class code (numeric pattern)
-      const spanMatches = tbodyHTML.match(/<span[^>]*>(\d{5})<\/span>/g);
-      if (spanMatches && spanMatches.length > 0) {
-        // Extract the numeric value from the first match
-        const match = spanMatches[0].match(/>(\d{5})</);
-        if (match && match[1]) {
-          const classCode = match[1].trim();
-          console.log('[WORKERS_COMP] ✓ Found Governing Class Code (fallback):', classCode);
+    // Fallback 2: Look for any 5-digit number in a span (less reliable)
+    const digitMatches = tbodyHTML.match(/<span[^>]*>(\d{5})<\/span>/g);
+    if (digitMatches && digitMatches.length > 0) {
+      // Find spans that could be class codes (5 digits only, not dates or policy numbers)
+      for (const match of digitMatches) {
+        const digitMatch = match.match(/>(\d{5})</);
+        if (digitMatch && digitMatch[1]) {
+          const classCode = digitMatch[1].trim();
+          // Additional validation: class codes typically start with 0-9
+          console.log('[WORKERS_COMP] ✓ Found potential Governing Class Code (fallback):', classCode);
           return classCode;
         }
       }
