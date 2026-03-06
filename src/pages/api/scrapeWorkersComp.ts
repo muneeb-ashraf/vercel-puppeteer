@@ -257,7 +257,7 @@ async function scrapeClassCodeDetails(
       }
 
       // Fallback: Try to find any <a> tag (in case structure changes)
-      const link = firstRow.querySelector('a[href]');
+      const link = firstRow.querySelector('a[href]') as HTMLAnchorElement;
       if (link) {
         return link.href;
       }
