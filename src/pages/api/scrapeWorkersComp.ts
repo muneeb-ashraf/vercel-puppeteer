@@ -5,9 +5,9 @@ import puppeteer, { Page, Browser } from 'puppeteer-core';
 // -------------------
 // Configuration
 // -------------------
-const MAX_ATTEMPTS = 2; // 2 attempts to stay within 60s limit
-const ATTEMPT_TIMEOUT = 25000; // 25 seconds per attempt (increased to fit 3 scrapes)
-const BROWSER_LAUNCH_TIMEOUT = 15000; // 15 seconds
+const MAX_ATTEMPTS = 2; // 2 attempts to stay within Vercel's 5-minute (300s) limit
+const ATTEMPT_TIMEOUT = 120000; // 120 seconds per attempt (fits 3 scrapes: Proof of Coverage, Class Code, Exemption)
+const BROWSER_LAUNCH_TIMEOUT = 50000; // 50 seconds for browser launch
 const MIN_COMPANY_NAME_LENGTH = 3;
 const PROOF_OF_COVERAGE_URL = 'https://dwcdataportal.fldfs.com/ProofOfCoverage.aspx';
 const EXEMPTION_URL = 'https://dwcdataportal.fldfs.com/Exemption.aspx';
