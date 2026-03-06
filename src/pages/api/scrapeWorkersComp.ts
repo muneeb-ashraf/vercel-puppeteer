@@ -158,48 +158,47 @@ async function extractExemptionResults(page: Page): Promise<{ tbody?: string; me
 }
 
 /**
- * Extract the Governing Class Code from the Proof of Coverage page
+ * Extract the Governing Class Code from the Proof of Coverage tbody HTML
  */
-async function extractGoverningClassCode(page: Page): Promise<string | null> {
+function extractGoverningClassCode(tbodyHTML: string): string | null {
   try {
-    // The Governing Class Code is in a span with ID like ContentPlaceHolder1_DataGrid_POC_Label9_0
-    const classCode = await page.evaluate(() => {
-      // Find the th element with "Governing Class Code" text
-      const headers = Array.from(document.querySelectorAll('th'));
-      const governingClassHeader = headers.find(th =>
-        th.textContent?.includes('Governing Class Code')
-      );
+    console.log('[WORKERS_COMP] Attempting to extract Governing Class Code from tbody HTML');
 
-      if (!governingClassHeader) return null;
+    // Parse the tbody HTML to find the span containing the class code
+    // The span has an ID pattern like: ContentPlaceHolder1_DataGrid_POC_Label9_0
+    // Strategy: Look for spans with IDs matching this pattern
+    const spanIdPattern = /ContentPlaceHolder1_DataGrid_POC_Label(\d+)_0/g;
+    const matches = tbodyHTML.match(/<span[^>]*id="ContentPlaceHolder1_DataGrid_POC_Label\d+_0"[^>]*>([^<]+)<\/span>/);
 
-      // Find the corresponding td in the same column
-      const headerIndex = Array.from(governingClassHeader.parentElement?.children || [])
-        .indexOf(governingClassHeader);
-
-      // Get the tbody row
-      const tbody = governingClassHeader.closest('table')?.querySelector('tbody');
-      if (!tbody) return null;
-
-      const firstDataRow = tbody.querySelector('tr');
-      if (!firstDataRow) return null;
-
-      const targetCell = firstDataRow.children[headerIndex] as HTMLElement;
-      if (!targetCell) return null;
-
-      // Extract the span content (e.g., ContentPlaceHolder1_DataGrid_POC_Label9_0)
-      const span = targetCell.querySelector('span');
-      return span ? span.textContent?.trim() || null : null;
-    });
-
-    if (classCode) {
-      console.log('[WORKERS_COMP] Found Governing Class Code:', classCode);
+    if (matches && matches[1]) {
+      const classCode = matches[1].trim();
+      console.log('[WORKERS_COMP] ✓ Found Governing Class Code:', classCode);
       return classCode;
     }
 
-    console.log('[WORKERS_COMP] No Governing Class Code found in Proof of Coverage');
+    // Fallback: Try to find by searching for the "Governing Class Code" header
+    // and extracting the corresponding cell value
+    if (tbodyHTML.includes('Governing Class Code')) {
+      console.log('[WORKERS_COMP] Found "Governing Class Code" text in tbody, trying alternative extraction');
+
+      // Look for span elements that might contain the class code (numeric pattern)
+      const spanMatches = tbodyHTML.match(/<span[^>]*>(\d{5})<\/span>/g);
+      if (spanMatches && spanMatches.length > 0) {
+        // Extract the numeric value from the first match
+        const match = spanMatches[0].match(/>(\d{5})</);
+        if (match && match[1]) {
+          const classCode = match[1].trim();
+          console.log('[WORKERS_COMP] ✓ Found Governing Class Code (fallback):', classCode);
+          return classCode;
+        }
+      }
+    }
+
+    console.log('[WORKERS_COMP] ✗ No Governing Class Code found in tbody HTML');
+    console.log('[WORKERS_COMP] Debug: tbody preview:', tbodyHTML.substring(0, 500));
     return null;
   } catch (error) {
-    console.error('[WORKERS_COMP] Error extracting Governing Class Code:', error);
+    console.error('[WORKERS_COMP] ✗ Error extracting Governing Class Code:', error);
     return null;
   }
 }
@@ -212,28 +211,53 @@ async function scrapeClassCodeDetails(
   classCode: string
 ): Promise<ClassCodeDetails | null> {
   try {
-    console.log('[WORKERS_COMP] Starting class code details scrape for code:', classCode);
+    console.log('[WORKERS_COMP] ═══ Starting class code details scrape ═══');
+    console.log('[WORKERS_COMP] Class code to search:', classCode);
 
     // Navigate to search page
     const searchUrl = `${INSURANCE_CLASS_CODE_BASE_URL}?search=${classCode}&state=FL`;
+    console.log('[WORKERS_COMP] Navigating to:', searchUrl);
     await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    console.log('[WORKERS_COMP] ✓ Page loaded successfully');
 
     // Wait for results table
-    await page.waitForSelector('#dataTableClassList', { timeout: 10000 }).catch(() => {
-      console.log('[WORKERS_COMP] Results table not found');
-    });
+    await page.waitForSelector('#dataTableClassList', { timeout: 10000 });
+    console.log('[WORKERS_COMP] ✓ Results table found');
 
-    // Find and click the first result row
+    // Extract detail page URL from the fakelink span
     const detailPageUrl = await page.evaluate(() => {
       const table = document.querySelector('#dataTableClassList');
-      if (!table) return null;
+      if (!table) {
+        console.log('Table #dataTableClassList not found');
+        return null;
+      }
 
-      const firstRow = table.querySelector('tr[visible="true"]');
-      if (!firstRow) return null;
+      // Look for tbody rows
+      const tbody = table.querySelector('tbody');
+      if (!tbody) {
+        console.log('tbody not found in table');
+        return null;
+      }
 
-      // Extract the href from the clickable row or construct URL from data
-      // The URL pattern is: /class/FL/{SLUG}/{description-hyphenated}
-      const link = firstRow.querySelector('a');
+      // Get the first row
+      const firstRow = tbody.querySelector('tr');
+      if (!firstRow) {
+        console.log('No rows found in tbody');
+        return null;
+      }
+
+      // Find the span with class "fakelink" that has data-href attribute
+      const fakelinkSpan = firstRow.querySelector('span.fakelink[data-href]');
+      if (fakelinkSpan) {
+        const dataHref = fakelinkSpan.getAttribute('data-href');
+        if (dataHref) {
+          // Construct full URL (data-href is relative)
+          return window.location.origin + dataHref;
+        }
+      }
+
+      // Fallback: Try to find any <a> tag (in case structure changes)
+      const link = firstRow.querySelector('a[href]');
       if (link) {
         return link.href;
       }
@@ -242,12 +266,17 @@ async function scrapeClassCodeDetails(
     });
 
     if (!detailPageUrl) {
-      console.log('[WORKERS_COMP] No detail page URL found for class code');
+      console.log('[WORKERS_COMP] ✗ No detail page URL found for class code');
+      console.log('[WORKERS_COMP] Possible causes: No results, different HTML structure, or class code not found');
       return null;
     }
 
+    console.log('[WORKERS_COMP] ✓ Found detail page URL:', detailPageUrl);
+    console.log('[WORKERS_COMP] Navigating to detail page...');
+
     // Navigate to detail page
     await page.goto(detailPageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    console.log('[WORKERS_COMP] ✓ Detail page loaded');
 
     // Extract data from the detail page
     const details = await page.evaluate(() => {
@@ -275,12 +304,14 @@ async function scrapeClassCodeDetails(
       };
     });
 
-    console.log('[WORKERS_COMP] Successfully extracted class code details');
+    console.log('[WORKERS_COMP] ✓ Successfully extracted class code details');
+    console.log('[WORKERS_COMP] Details:', JSON.stringify(details, null, 2));
+    console.log('[WORKERS_COMP] ═══ Class code scrape complete ═══');
     return details;
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('[WORKERS_COMP] Class code details scrape failed:', errorMessage);
+    console.error('[WORKERS_COMP] ✗ Class code details scrape failed:', errorMessage);
     return null;
   }
 }
@@ -436,20 +467,29 @@ async function attemptScrape(companyName: string): Promise<ScrapeResult> {
 
       // If Proof of Coverage has data (not a message), try to extract and scrape class code
       if (proofOfCoverageResult && proofOfCoverageResult.tbody) {
+        console.log('[WORKERS_COMP] ─── Proof of Coverage has data, attempting class code extraction ───');
         try {
-          const classCode = await extractGoverningClassCode(page);
+          const classCode = extractGoverningClassCode(proofOfCoverageResult.tbody);
           if (classCode) {
+            console.log('[WORKERS_COMP] ✓ Successfully extracted class code:', classCode);
+            console.log('[WORKERS_COMP] ─── Beginning class code details scrape ───');
             classCodeDetails = await scrapeClassCodeDetails(page, classCode);
             if (classCodeDetails) {
-              console.log('[WORKERS_COMP] Class code details scrape completed successfully');
+              console.log('[WORKERS_COMP] ✓ Class code details scrape completed successfully');
+            } else {
+              console.log('[WORKERS_COMP] ✗ Class code details scrape returned null');
             }
+          } else {
+            console.log('[WORKERS_COMP] ✗ Could not extract class code from Proof of Coverage tbody');
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('[WORKERS_COMP] Class code details scrape failed:', errorMessage);
+          console.error('[WORKERS_COMP] ✗ Class code details scrape failed:', errorMessage);
           errors.push(`Class Code Details: ${errorMessage}`);
           // Don't fail the entire request if class code scraping fails
         }
+      } else {
+        console.log('[WORKERS_COMP] ⊘ Skipping class code extraction (no tbody data in Proof of Coverage)');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
