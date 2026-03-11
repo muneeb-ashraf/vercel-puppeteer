@@ -350,6 +350,44 @@ async function scrapeClassCodeDetails(
   }
 }
 
+function generateNameVariations(trimmedName: string): string[] {
+  const seen = new Set<string>();
+  const variations: string[] = [];
+
+  const add = (v: string) => {
+    const clean = v.replace(/\s+/g, ' ').trim();
+    if (clean.length >= MIN_COMPANY_NAME_LENGTH && !seen.has(clean)) {
+      seen.add(clean);
+      variations.push(clean);
+    }
+  };
+
+  // V1: existing — remove all punctuation
+  const v1 = trimmedName
+    .replace(/[.,\/#!$%\^\*;:{}=\-_`~()'"@+?\\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  add(v1);
+
+  // V2: replace dots with spaces first, then remove other punctuation
+  const v2 = trimmedName
+    .replace(/\./g, ' ')
+    .replace(/[,\/#!$%\^\*;:{}=\-_`~()'"@+?\\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  add(v2);
+
+  // V3: from V2, merge consecutive single uppercase letters (e.g. "J A C" → "JAC")
+  const v3 = v2.replace(/\b[A-Z](\s+[A-Z])+\b/g, match => match.replace(/\s+/g, ''));
+  add(v3);
+
+  return variations;
+}
+
+function hasActualData(result: { success: boolean; data?: any }): boolean {
+  return !!(result.data?.proofOfCoverage?.tbody || result.data?.exemption?.tbody);
+}
+
 // -------------------
 // Browser Management
 // -------------------
@@ -700,7 +738,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const trimmedCompanyName = companyName.trim();
 
   // Remove all punctuation from company name (commas, periods, apostrophes, etc.)
-  const sanitizedCompanyName = trimmedCompanyName.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()'"@+?\\[\]]/g, '').replace(/\s+/g, ' ').trim();
+  const sanitizedCompanyName = trimmedCompanyName.replace(/[.,\/#!$%\^\*;:{}=\-_`~()'"@+?\\[\]]/g, '').replace(/\s+/g, ' ').trim();
 
   if (sanitizedCompanyName.length < MIN_COMPANY_NAME_LENGTH) {
     return res.status(400).json({
@@ -718,7 +756,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const startTime = Date.now();
 
   try {
-    const result = await scrapeWithRetry(sanitizedCompanyName);
+    // Generate variations and try each one
+    const nameVariations = generateNameVariations(trimmedCompanyName);
+    console.log(`[WORKERS_COMP] Will try ${nameVariations.length} name variation(s):`, nameVariations);
+
+    let result: Awaited<ReturnType<typeof scrapeWithRetry>> | null = null;
+    for (let i = 0; i < nameVariations.length; i++) {
+      const variation = nameVariations[i];
+      console.log(`[WORKERS_COMP] Trying variation ${i + 1}/${nameVariations.length}: "${variation}"`);
+      result = await scrapeWithRetry(variation);
+      if (result.success && hasActualData(result)) {
+        console.log(`[WORKERS_COMP] Found actual data with variation ${i + 1}: "${variation}"`);
+        break;
+      }
+      console.log(`[WORKERS_COMP] No actual data with variation ${i + 1}, trying next...`);
+    }
+
+    if (!result) {
+      return res.status(500).json({ success: false, error: 'No name variations to try' });
+    }
 
     const duration = Date.now() - startTime;
     console.log(`[WORKERS_COMP] Request completed in ${duration}ms after ${result.attempts} attempts`);
