@@ -225,6 +225,27 @@ function generateNameVariations(companyName: string): string[] {
     variations.add(words.slice(0, 3).join(' '));
   }
   
+  // 7. Dotted initials variations (e.g. "J.A.C. Smith" → "JAC Smith")
+  const originalTrimmed = companyName.trim();
+  // V1: Remove all punctuation from original name
+  const v1 = originalTrimmed
+    .replace(/[.,\/#!$%\^\*;:{}=\-_`~()'"@+?\\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  variations.add(v1);
+
+  // V2: Replace dots with spaces, then remove other punctuation
+  const v2 = originalTrimmed
+    .replace(/\./g, ' ')
+    .replace(/[,\/#!$%\^\*;:{}=\-_`~()'"@+?\\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  variations.add(v2);
+
+  // V3: From V2, merge consecutive single uppercase letters ("J A C Smith" → "JAC Smith")
+  const v3 = v2.replace(/\b[A-Z](\s+[A-Z])+\b/g, match => match.replace(/\s+/g, ''));
+  variations.add(v3);
+
   // Convert to array and filter empty/duplicate strings
   return Array.from(variations)
     .filter(v => v.length > 0)
@@ -247,6 +268,17 @@ function generateSearchQueries(companyName: string): string[] {
   // Without special characters
   queries.add(companyName.replace(/[&]/g, 'and').trim());
   
+  // Merged-initials form (e.g. "J.A.C. Smith" → "JAC Smith")
+  const mergedInitials = companyName.trim()
+    .replace(/\./g, ' ')
+    .replace(/[,\/#!$%\^\*;:{}=\-_`~()'"@+?\\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b[A-Z](\s+[A-Z])+\b/g, match => match.replace(/\s+/g, ''));
+  if (mergedInitials.length > 0) {
+    queries.add(mergedInitials);
+  }
+
   return Array.from(queries).filter(q => q.length > 0);
 }
 
