@@ -10,21 +10,51 @@ const ATTEMPT_TIMEOUT = 40000; // 40 seconds per attempt
 const BROWSER_LAUNCH_TIMEOUT = 15000;
 const MAX_RESULTS = 10;
 
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+];
+
 // -------------------
 // Browser Management
 // -------------------
 async function launchBrowserWithTimeout(): Promise<Browser> {
   return Promise.race([
     puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: { width: 1920, height: 1080 },
+      args: [
+        ...chromium.args,
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--window-size=1920,1080',
+      ],
       executablePath: await chromium.executablePath(),
-      headless: "shell",
+      headless: true,
     }),
     new Promise<Browser>((_, reject) =>
       setTimeout(() => reject(new Error('Browser launch timeout')), BROWSER_LAUNCH_TIMEOUT)
     ),
   ]);
+}
+
+async function configurePage(page: Page): Promise<void> {
+  const userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+  await page.setUserAgent(userAgent);
+  await page.setViewport({ width: 1920, height: 1080 });
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  });
+  // Mask webdriver detection
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+  });
 }
 
 async function closeBrowserSafely(browser: Browser | null): Promise<void> {
@@ -91,6 +121,7 @@ async function attemptSearch(companyName: string) {
     browser = await launchBrowserWithTimeout();
     const page = await browser.newPage();
     page.setDefaultTimeout(30000);
+    await configurePage(page);
 
     const results = await searchSunbiz(page, companyName);
     await closeBrowserSafely(browser);
