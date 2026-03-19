@@ -6,7 +6,8 @@
       "Bash(git add:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd class code details scraping to Workers'' Comp API\n\nEnhanced the scrapeWorkersComp endpoint to scrape three sources:\n- Proof of Coverage \\(existing\\)\n- Exemption \\(existing\\) \n- Class Code Details \\(new\\) from insurancexdate.com\n\nWhen Proof of Coverage returns data, the API now:\n1. Extracts the Governing Class Code from the results table\n2. Navigates to insurancexdate.com to search for the class code\n3. Scrapes detailed information including industry, phraseology, description, and category\n\nKey features:\n- Sequential scraping using single browser instance for efficiency\n- Conditional class code scraping \\(only when POC has data\\)\n- Graceful error handling - class code failures don''t fail entire request\n- Response includes classCodeDetails field \\(null if not available\\)\n- Increased timeout from 22s to 25s to accommodate third scrape\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git push:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }
