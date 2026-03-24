@@ -78,8 +78,11 @@ async function searchSunbiz(page: Page, companyName: string) {
   // Wait for the search form — confirms Cloudflare challenge has passed
   await page.waitForSelector('#SearchTerm', { timeout: 15000 });
 
+  // Remove forward slashes from company name before searching (SunBiz doesn't handle them)
+  const searchName = companyName.replace(/\//g, '');
+
   // Enter company name and submit
-  await page.type('#SearchTerm', companyName);
+  await page.type('#SearchTerm', searchName);
   await page.click('input[type="submit"][value="Search Now"]');
   await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
 
