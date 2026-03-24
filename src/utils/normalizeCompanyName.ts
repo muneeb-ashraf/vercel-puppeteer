@@ -6,8 +6,8 @@ export function normalizeCompanyName(name: string): string {
       .trim()
       // collapse multiple spaces
       .replace(/\s+/g, " ")
-      // strip periods/commas (to neutralize differences)
-      .replace(/[.,]/g, "")
+      // strip periods/commas/slashes (to neutralize differences)
+      .replace(/[.,\/]/g, "")
       // normalize common suffixes
       .replace(/\b(LIMITED LIABILITY COMPANY|L L C|LLC)\b/g, "LLC")
       .replace(/\b(INCORPORATED|INC)\b/g, "INC")

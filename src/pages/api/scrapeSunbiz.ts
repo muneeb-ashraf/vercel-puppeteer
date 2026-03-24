@@ -32,8 +32,11 @@ async function searchByCompanyName(page: Page, companyName: string) {
   
   await page.goto(baseUrl, { waitUntil: 'networkidle2', timeout: 30000 });
   
+  // Remove forward slashes from company name before searching (SunBiz doesn't handle them)
+  const searchName = companyName.replace(/\//g, '');
+
   // Enter company name in search input
-  await page.type('#SearchTerm', companyName);
+  await page.type('#SearchTerm', searchName);
   
   // Click search button
   await page.click('input[type="submit"][value="Search Now"]');
