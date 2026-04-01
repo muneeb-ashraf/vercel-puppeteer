@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextApiRequest, NextApiResponse } from 'next';
+import { getAndAmpersandVariant } from "@/utils/normalizeCompanyName";
 
 // Initialize Supabase client
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -539,7 +540,18 @@ export default async function handler(
       });
     }
     
-    const reviewsData = await fetchGoogleReviews(companyName, state);
+    let reviewsData = await fetchGoogleReviews(companyName, state);
+
+    // If original name failed to find business, try and/& variant
+    if (!reviewsData.business_found) {
+      const variant = getAndAmpersandVariant(companyName);
+      if (variant) {
+        console.log(`[GOOGLE_REVIEWS_DEBUG] Retrying with and/& variant: "${variant}"`);
+        const variantResult = await fetchGoogleReviews(variant, state);
+        if (variantResult.business_found) reviewsData = variantResult;
+      }
+    }
+
     return res.status(200).json(reviewsData);
     
   } catch (error) {

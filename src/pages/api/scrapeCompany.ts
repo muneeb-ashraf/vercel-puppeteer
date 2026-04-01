@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import chromium from '@sparticuz/chromium';
 import puppeteer, { Page } from 'puppeteer-core';
-import { normalizeCompanyName } from "@/utils/normalizeCompanyName";
+import { normalizeCompanyName, getAndAmpersandVariant } from "@/utils/normalizeCompanyName";
 
 // -------------------
 // Helper Functions
@@ -210,7 +210,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let responseData: any = null;
 
     if (companyName && !licenseNumber) {
-      const result = await searchByCompanyName(page, baseUrl, companyName);
+      let result = await searchByCompanyName(page, baseUrl, companyName);
+
+      // If original name found nothing, try and/& variant
+      if (!result) {
+        const variant = getAndAmpersandVariant(companyName);
+        if (variant) {
+          console.log(`[SCRAPE_COMPANY] Retrying with and/& variant: "${variant}"`);
+          result = await searchByCompanyName(page, baseUrl, variant);
+        }
+      }
 
       if (!result) return res.status(404).json({ error: 'Company not found.' });
       if ((result as any).reviewNeeded) {

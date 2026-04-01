@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import chromium from '@sparticuz/chromium';
 import puppeteer, { Page, Browser } from 'puppeteer-core';
-import { normalizeCompanyName } from "@/utils/normalizeCompanyName";
+import { normalizeCompanyName, getAndAmpersandVariant } from "@/utils/normalizeCompanyName";
 
 // -------------------
 // Configuration
@@ -309,8 +309,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const startTime = Date.now();
 
   try {
-    const result = await scrapeWithRetry(companyName);
-    
+    let result = await scrapeWithRetry(companyName);
+
+    // If original name failed, try and/& variant
+    if (!result.success) {
+      const variant = getAndAmpersandVariant(companyName);
+      if (variant) {
+        console.log(`Retrying with and/& variant: "${variant}"`);
+        const variantResult = await scrapeWithRetry(variant);
+        if (variantResult.success) result = variantResult;
+      }
+    }
+
     const duration = Date.now() - startTime;
     console.log(`Request completed in ${duration}ms after ${result.attempts} attempts`);
 

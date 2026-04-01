@@ -17,3 +17,13 @@ export function normalizeCompanyName(name: string): string {
     
       .trim();
   }
+
+export function getAndAmpersandVariant(name: string): string | null {
+  if (/ and /i.test(name)) {
+    return name.replace(/ and /gi, ' & ');
+  }
+  if (/ & /.test(name)) {
+    return name.replace(/ & /g, ' and ');
+  }
+  return null;
+}

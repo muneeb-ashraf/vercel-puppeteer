@@ -267,7 +267,8 @@ function generateSearchQueries(companyName: string): string[] {
   
   // Without special characters
   queries.add(companyName.replace(/[&]/g, 'and').trim());
-  
+  queries.add(companyName.replace(/\band\b/gi, '&').trim());
+
   // Merged-initials form (e.g. "J.A.C. Smith" → "JAC Smith")
   const mergedInitials = companyName.trim()
     .replace(/\./g, ' ')

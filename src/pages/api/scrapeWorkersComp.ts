@@ -381,6 +381,14 @@ function generateNameVariations(trimmedName: string): string[] {
   const v3 = v2.replace(/\b[A-Z](\s+[A-Z])+\b/g, match => match.replace(/\s+/g, ''));
   add(v3);
 
+  // V4: and/& variations — swap "and" <-> "&"
+  if (/ and /i.test(v1)) {
+    add(v1.replace(/ and /gi, ' & '));
+  }
+  if (/ & /.test(v1)) {
+    add(v1.replace(/ & /g, ' and '));
+  }
+
   return variations;
 }
 
