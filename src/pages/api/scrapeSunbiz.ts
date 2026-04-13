@@ -49,14 +49,16 @@ async function searchByCompanyName(page: Page, companyName: string) {
     for (const row of rows.slice(0, 5)) {
       const nameCell = row.querySelector('td:first-child');
       const docNumCell = row.querySelector('td:nth-child(2)');
-      
+      const statusCell = row.querySelector('td:nth-child(3)');
+
       const link = nameCell?.querySelector('a');
       const text = link?.textContent?.trim() || '';
       const href = link?.href || '';
       const documentNumber = docNumCell?.textContent?.trim() || '';
-      
+      const status = statusCell?.textContent?.trim() || '';
+
       if (text && href && documentNumber) {
-        results.push({ text, href, documentNumber });
+        results.push({ text, href, documentNumber, status });
       }
     }
     return results;
@@ -82,16 +84,22 @@ async function searchByCompanyName(page: Page, companyName: string) {
 
   const normalizedSearchName = normalizeCompanyName(companyName);
 
-  // Check the filtered results for an exact match
-  for (const result of filteredResults) {
+  // Collect all exact name matches
+  const exactMatches = filteredResults.filter(result => {
     const normalizedResultText = normalizeCompanyName(result.text);
-    
-    // Check for an exact match or an exact match with comma variations
-    if (normalizedResultText === normalizedSearchName ||
-        normalizedResultText === normalizedSearchName.replace(',', '') ||
-        normalizedResultText.replace(',', '') === normalizedSearchName) {
-      return result.href; // Return the href of the first exact match found
-    }
+    return normalizedResultText === normalizedSearchName ||
+           normalizedResultText === normalizedSearchName.replace(',', '') ||
+           normalizedResultText.replace(',', '') === normalizedSearchName;
+  });
+
+  if (exactMatches.length === 1) {
+    return exactMatches[0].href;
+  }
+
+  // Multiple exact matches — prefer the Active one
+  if (exactMatches.length > 1) {
+    const activeMatch = exactMatches.find(r => r.status.toLowerCase() === 'active');
+    return (activeMatch || exactMatches[0]).href;
   }
 
   // If no exact match is found, look for close matches within the filtered list
