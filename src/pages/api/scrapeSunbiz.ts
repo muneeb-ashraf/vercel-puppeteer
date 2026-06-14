@@ -2,6 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import chromium from '@sparticuz/chromium';
 import puppeteer, { Page, Browser } from 'puppeteer-core';
 import { normalizeCompanyName, getAndAmpersandVariant } from "@/utils/normalizeCompanyName";
+import { fetchSunbizDetailWithApify } from '@/utils/sunbizApify';
 
 // -------------------
 // Configuration
@@ -341,15 +342,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
-  const { companyName } = req.body;
-  if (!companyName) {
-    return res.status(400).json({ error: 'Company name is required.' });
+  const { companyName, documentNumber } = req.body;
+  if (!companyName && !documentNumber) {
+    return res.status(400).json({ error: 'Company name or document number is required.' });
   }
 
-  console.log(`Starting scrape request for: ${companyName}`);
+  console.log(`Starting scrape request for: ${companyName || documentNumber}`);
   const startTime = Date.now();
 
   try {
+    if (process.env.SUNBIZ_PROVIDER !== 'browser') {
+      try {
+        const apifyResult = await fetchSunbizDetailWithApify({
+          companyName,
+          documentNumber,
+        });
+
+        if (apifyResult) {
+          const duration = Date.now() - startTime;
+          console.log(`Apify Sunbiz request completed in ${duration}ms`);
+          return res.status(200).json({
+            ...apifyResult,
+            meta: {
+              provider: 'apify_parseforge',
+              duration,
+            },
+          });
+        }
+
+        console.warn('Apify Sunbiz returned no matching records, falling back to browser scrape');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn('Apify Sunbiz failed, falling back to browser scrape:', message);
+      }
+    }
+
+    if (!companyName) {
+      return res.status(404).json({
+        error: 'Sunbiz document lookup returned no data and browser fallback requires a company name.',
+        meta: {
+          duration: Date.now() - startTime,
+        },
+      });
+    }
+
     let result = await scrapeWithRetry(companyName);
 
     // If original name failed, try and/& variant

@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import chromium from '@sparticuz/chromium';
 import puppeteer, { Page, Browser } from 'puppeteer-core';
+import { searchSunbizWithApify } from '@/utils/sunbizApify';
 
 // -------------------
 // Configuration
@@ -221,15 +222,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
-  const { companyName } = req.body;
+  const { companyName, maxResults } = req.body;
   if (!companyName) {
     return res.status(400).json({ error: 'Company name is required.' });
   }
 
   console.log(`[scrapeSunbizSearch] Starting search for: ${companyName}`);
   const startTime = Date.now();
+  const resultLimit = Math.min(Math.max(Number(maxResults) || 5, 1), 5);
 
   try {
+    if (process.env.SUNBIZ_PROVIDER !== 'browser') {
+      try {
+        const results = await searchSunbizWithApify(companyName, resultLimit);
+        const duration = Date.now() - startTime;
+        console.log(`[scrapeSunbizSearch] Apify completed in ${duration}ms, found ${results.length} results`);
+
+        return res.status(200).json({
+          results,
+          meta: {
+            provider: 'apify_parseforge',
+            attempts: 1,
+            duration,
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn('[scrapeSunbizSearch] Apify search failed, falling back to browser:', message);
+      }
+    }
+
     const result = await searchWithRetry(companyName);
     const duration = Date.now() - startTime;
     console.log(`[scrapeSunbizSearch] Completed in ${duration}ms after ${result.attempts} attempts`);
