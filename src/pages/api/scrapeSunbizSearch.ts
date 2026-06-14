@@ -6,7 +6,7 @@ import puppeteer, { Page, Browser } from 'puppeteer-core';
 // Configuration
 // -------------------
 const MAX_ATTEMPTS = 2;
-const ATTEMPT_TIMEOUT = 40000; // 40 seconds per attempt
+const ATTEMPT_TIMEOUT = 90000; // Give Cloudflare's browser challenge time to clear.
 const BROWSER_LAUNCH_TIMEOUT = 15000;
 const MAX_RESULTS = 10;
 

@@ -7,7 +7,7 @@ import { normalizeCompanyName, getAndAmpersandVariant } from "@/utils/normalizeC
 // Configuration
 // -------------------
 const MAX_ATTEMPTS = 4; // Total attempts within the 5-minute window
-const ATTEMPT_TIMEOUT = 60000; // 60 seconds per attempt
+const ATTEMPT_TIMEOUT = 90000; // Give Cloudflare's browser challenge time to clear.
 const BROWSER_LAUNCH_TIMEOUT = 15000; // 15 seconds to launch browser
 
 // -------------------
