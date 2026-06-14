@@ -11,13 +11,14 @@ const BROWSER_LAUNCH_TIMEOUT = 15000;
 const MAX_RESULTS = 10;
 
 const USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
 ];
+
+const SUNBIZ_BY_NAME_URL = 'https://search.sunbiz.org/Inquiry/CorporationSearch/ByName';
+const SEARCH_RESULTS_SELECTOR = '#search-results tbody tr';
+const SEARCH_INPUT_SELECTOR = '#SearchTerm, input[name="SearchTerm"]';
 
 // -------------------
 // Browser Management
@@ -32,10 +33,12 @@ async function launchBrowserWithTimeout(): Promise<Browser> {
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
+        '--disable-blink-features=AutomationControlled',
+        '--lang=en-US,en',
         '--window-size=1920,1080',
       ],
       executablePath: await chromium.executablePath(),
-      headless: true,
+      headless: "shell",
     }),
     new Promise<Browser>((_, reject) =>
       setTimeout(() => reject(new Error('Browser launch timeout')), BROWSER_LAUNCH_TIMEOUT)
@@ -46,6 +49,7 @@ async function launchBrowserWithTimeout(): Promise<Browser> {
 async function configurePage(page: Page): Promise<void> {
   const userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
   await page.setUserAgent(userAgent);
+  await page.setJavaScriptEnabled(true);
   await page.setViewport({ width: 1920, height: 1080 });
   await page.setExtraHTTPHeaders({
     'Accept-Language': 'en-US,en;q=0.9',
@@ -54,6 +58,8 @@ async function configurePage(page: Page): Promise<void> {
   // Mask webdriver detection
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
   });
 }
 
@@ -70,25 +76,25 @@ async function closeBrowserSafely(browser: Browser | null): Promise<void> {
 // -------------------
 // Search Logic
 // -------------------
-async function searchSunbiz(page: Page, companyName: string) {
-  const baseUrl = 'https://search.sunbiz.org/Inquiry/CorporationSearch/ByName';
+async function getPageDiagnostics(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const bodyText = document.body?.innerText?.replace(/\s+/g, ' ').trim().slice(0, 220) || '';
+    return `url=${location.href}; title=${document.title}; body=${bodyText}`;
+  }).catch(error => `diagnostics unavailable: ${error instanceof Error ? error.message : String(error)}`);
+}
 
-  await page.goto(baseUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+async function waitForSunbizContent(page: Page): Promise<void> {
+  try {
+    await page.waitForSelector(`${SEARCH_RESULTS_SELECTOR}, ${SEARCH_INPUT_SELECTOR}`, { timeout: 45000 });
+  } catch {
+    const diagnostics = await getPageDiagnostics(page);
+    throw new Error(`Sunbiz did not expose search results or form after browser load. ${diagnostics}`);
+  }
+}
 
-  // Wait for the search form — confirms Cloudflare challenge has passed
-  await page.waitForSelector('#SearchTerm', { timeout: 15000 });
-
-  // Remove forward slashes from company name before searching (SunBiz doesn't handle them)
-  const searchName = companyName.replace(/\//g, '');
-
-  // Enter company name and submit
-  await page.type('#SearchTerm', searchName);
-  await page.click('input[type="submit"][value="Search Now"]');
-  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-
-  // Parse search result rows
-  const results = await page.$$eval(
-    '#search-results tbody tr',
+async function readResultRows(page: Page) {
+  return page.$$eval(
+    SEARCH_RESULTS_SELECTOR,
     (rows: HTMLTableRowElement[], max: number) => {
       const parsed: { name: string; documentNumber: string; status: string; detailUrl: string }[] = [];
       for (const row of rows.slice(0, max)) {
@@ -110,7 +116,27 @@ async function searchSunbiz(page: Page, companyName: string) {
     },
     MAX_RESULTS
   );
+}
 
+async function searchSunbiz(page: Page, companyName: string) {
+  const searchName = companyName.replace(/\//g, '');
+  const resultsUrl = `https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResults/EntityName/${encodeURIComponent(searchName)}/Page1`;
+
+  await page.goto(resultsUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await waitForSunbizContent(page);
+
+  let results = await readResultRows(page);
+  if (results.length > 0) return results;
+
+  await page.goto(SUNBIZ_BY_NAME_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await waitForSunbizContent(page);
+
+  await page.type(SEARCH_INPUT_SELECTOR, searchName);
+  await page.click('input[type="submit"][value="Search Now"]');
+  await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  await waitForSunbizContent(page);
+
+  results = await readResultRows(page);
   return results;
 }
 
