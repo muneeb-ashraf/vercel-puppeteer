@@ -166,6 +166,10 @@ async function attemptSearch(companyName: string) {
 // -------------------
 // Retry Logic
 // -------------------
+function isSunbizSecurityBlock(errorMessage: string): boolean {
+  return /just a moment|performing security verification|protect against malicious bots|did not expose search results or form/i.test(errorMessage);
+}
+
 async function searchWithRetry(companyName: string) {
   const errors: string[] = [];
 
@@ -199,9 +203,11 @@ async function searchWithRetry(companyName: string) {
     }
   }
 
+  const error = `All ${MAX_ATTEMPTS} attempts failed. ${errors.join(' | ')}`;
   return {
     success: false as const,
-    error: `All ${MAX_ATTEMPTS} attempts failed. ${errors.join(' | ')}`,
+    error,
+    blocked: errors.some(isSunbizSecurityBlock),
     attempts: MAX_ATTEMPTS,
   };
 }
@@ -232,6 +238,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({
         results: result.data,
         meta: { attempts: result.attempts, duration },
+      });
+    } else if (result.blocked) {
+      return res.status(200).json({
+        results: [],
+        error: result.error,
+        meta: {
+          attempts: result.attempts,
+          duration,
+          blocked: true,
+          reason: 'sunbiz_security_verification',
+        },
       });
     } else {
       return res.status(500).json({
